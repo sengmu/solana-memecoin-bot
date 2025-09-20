@@ -142,7 +142,7 @@ tab1, tab2, tab3, tab4 = st.tabs(["🔍 代币发现", "📈 持仓监控", "�
 
 with tab1:
     st.header("🔍 代币发现")
-
+    
     # 刷新按钮
     if st.button("🔄 刷新发现", type="primary"):
         try:
@@ -196,6 +196,7 @@ with tab1:
                     # 显示数据
                     st.dataframe(df, width='stretch')
                     st.success(f"✅ 发现 {len(filtered_memecoins)} 个符合条件的代币")
+                    st.write("Test passed")  # Test confirmation
                 else:
                     st.warning("⚠️ 没有找到符合条件的代币")
 
@@ -235,13 +236,13 @@ with tab3:
 
     # 跟单配置
     col1, col2 = st.columns(2)
-
+    
     with col1:
         st.subheader("📊 跟单统计")
         st.metric("跟单状态", "启用" if getattr(bot, 'enable_copy', False) else "禁用")
         st.metric("买入金额", f"{getattr(bot, 'buy_size_sol', 0)} SOL")
         st.metric("跟单交易员", getattr(bot, 'copy_trader', "未设置"))
-
+    
     with col2:
         st.subheader("⚙️ 跟单设置")
         enable_copy = st.checkbox("启用跟单", value=getattr(bot, 'enable_copy', False))
@@ -275,7 +276,7 @@ with tab4:
     if st.button("重置为默认值"):
         st.info("配置已重置为默认值")
         st.rerun()
-
+    
 # 页脚
 st.markdown("---")
 st.markdown("🤖 Memecoin Trading Bot Dashboard - 智能代币交易机器人")
