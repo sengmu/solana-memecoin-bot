@@ -328,28 +328,88 @@ def render_advanced_config(config_manager):
         config_manager.config['TWITTER_BEARER_TOKEN'] = twitter_token
     
     with tab2:
+        st.markdown("### 🤖 复制交易配置")
+        
         copy_trading = st.checkbox(
             "启用复制交易",
             value=config_manager.config['COPY_TRADING_ENABLED'].lower() == 'true',
             help="复制其他钱包的交易"
         )
         
-        leader_wallet = st.text_input(
-            "领导者钱包地址",
-            value=config_manager.config['LEADER_WALLET_ADDRESS'],
-            help="要复制的钱包地址"
-        )
+        if copy_trading:
+            st.info("💡 复制交易功能已启用，机器人将自动跟随指定钱包的交易")
+            
+            # 主要跟单钱包
+            leader_wallet = st.text_input(
+                "主要跟单钱包地址",
+                value=config_manager.config['LEADER_WALLET_ADDRESS'],
+                help="要复制的主要钱包地址（必填）",
+                placeholder="9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
+            )
+            
+            # 多个跟单钱包
+            leader_wallets = st.text_area(
+                "多个跟单钱包地址（可选）",
+                value=config_manager.config.get('LEADER_WALLETS', ''),
+                help="多个钱包地址，用逗号分隔。例如：wallet1,wallet2,wallet3",
+                placeholder="9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM,7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"
+            )
+            
+            # 跟单比例
+            copy_ratio = st.slider(
+                "跟单比例",
+                min_value=0.1,
+                max_value=2.0,
+                value=float(config_manager.config.get('COPY_RATIO', '1.0')),
+                step=0.1,
+                help="跟单比例：1.0 = 100%，0.5 = 50%，2.0 = 200%"
+            )
+            
+            # 最小置信度
+            min_confidence = st.slider(
+                "最小置信度 (%)",
+                min_value=0,
+                max_value=100,
+                value=int(float(config_manager.config['MIN_CONFIDENCE_SCORE'])),
+                help="只有置信度超过此值的交易才会被复制"
+            )
+            
+            # 跟单模式选择
+            copy_mode = st.selectbox(
+                "跟单模式",
+                ["保守模式", "平衡模式", "激进模式"],
+                help="选择跟单的激进程度"
+            )
+            
+            # 根据模式调整参数
+            if copy_mode == "保守模式":
+                st.info("🛡️ 保守模式：只跟单高置信度、小仓位的交易")
+                if min_confidence < 80:
+                    min_confidence = 80
+                if copy_ratio > 0.5:
+                    copy_ratio = 0.5
+            elif copy_mode == "激进模式":
+                st.info("⚡ 激进模式：跟单更多交易，使用更大仓位")
+                if min_confidence > 50:
+                    min_confidence = 50
+                if copy_ratio < 1.0:
+                    copy_ratio = 1.0
+            
+            # 显示当前配置摘要
+            st.markdown("### 📊 当前配置摘要")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("跟单比例", f"{copy_ratio*100:.0f}%")
+            with col2:
+                st.metric("最小置信度", f"{min_confidence}%")
+            with col3:
+                st.metric("跟单模式", copy_mode)
         
-        min_confidence = st.slider(
-            "最小置信度 (%)",
-            min_value=0,
-            max_value=100,
-            value=int(float(config_manager.config['MIN_CONFIDENCE_SCORE'])),
-            help="复制交易的最小置信度"
-        )
-        
+        # 更新配置
         config_manager.config['COPY_TRADING_ENABLED'] = str(copy_trading).lower()
         config_manager.config['LEADER_WALLET_ADDRESS'] = leader_wallet
+        config_manager.config['LEADER_WALLETS'] = leader_wallets
+        config_manager.config['COPY_RATIO'] = str(copy_ratio)
         config_manager.config['MIN_CONFIDENCE_SCORE'] = str(min_confidence)
     
     with tab3:

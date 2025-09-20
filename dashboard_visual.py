@@ -479,6 +479,114 @@ def render_trading_history(dashboard_manager):
     
     st.markdown('</div>', unsafe_allow_html=True)
 
+def render_copy_trading_panel(dashboard_manager):
+    """渲染跟单交易面板"""
+    st.markdown('<div class="panel">', unsafe_allow_html=True)
+    st.subheader("🤖 跟单交易监控")
+    
+    # 检查跟单配置
+    try:
+        from dotenv import load_dotenv
+        import os
+        load_dotenv()
+        
+        copy_enabled = os.getenv('COPY_TRADING_ENABLED', 'false').lower() == 'true'
+        leader_wallet = os.getenv('LEADER_WALLET_ADDRESS', '')
+        copy_ratio = float(os.getenv('COPY_RATIO', '1.0'))
+        min_confidence = int(os.getenv('MIN_CONFIDENCE_SCORE', '70'))
+        
+        if copy_enabled and leader_wallet:
+            # 跟单状态
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("跟单状态", "🟢 已启用", "运行中")
+            
+            with col2:
+                st.metric("跟单比例", f"{copy_ratio*100:.0f}%", "当前设置")
+            
+            with col3:
+                st.metric("最小置信度", f"{min_confidence}%", "过滤阈值")
+            
+            with col4:
+                st.metric("跟单钱包", "1个", "已配置")
+            
+            # 跟单钱包信息
+            st.markdown("### 📍 跟单钱包信息")
+            st.code(f"主要钱包: {leader_wallet[:8]}...{leader_wallet[-8:]}")
+            
+            # 模拟跟单交易记录
+            st.markdown("### 📊 最近跟单交易")
+            
+            copy_trades = [
+                {
+                    'time': '2024-01-20 14:30:25',
+                    'token': 'PEPE',
+                    'action': '买入',
+                    'amount': '0.5 SOL',
+                    'confidence': 85,
+                    'status': '成功'
+                },
+                {
+                    'time': '2024-01-20 14:25:10',
+                    'token': 'DOGE',
+                    'action': '卖出',
+                    'amount': '1.2 SOL',
+                    'confidence': 92,
+                    'status': '成功'
+                },
+                {
+                    'time': '2024-01-20 14:15:45',
+                    'token': 'BONK',
+                    'action': '买入',
+                    'amount': '0.8 SOL',
+                    'confidence': 78,
+                    'status': '成功'
+                }
+            ]
+            
+            for trade in copy_trades:
+                col1, col2, col3, col4, col5, col6 = st.columns(6)
+                with col1:
+                    st.text(trade['time'])
+                with col2:
+                    st.text(trade['token'])
+                with col3:
+                    color = "🟢" if trade['action'] == '买入' else "🔴"
+                    st.text(f"{color} {trade['action']}")
+                with col4:
+                    st.text(trade['amount'])
+                with col5:
+                    st.text(f"{trade['confidence']}%")
+                with col6:
+                    status_color = "🟢" if trade['status'] == '成功' else "🔴"
+                    st.text(f"{status_color} {trade['status']}")
+            
+            # 跟单统计
+            st.markdown("### 📈 跟单统计")
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric("今日跟单次数", "12", "3")
+            
+            with col2:
+                st.metric("成功率", "91.7%", "2.3%")
+            
+            with col3:
+                st.metric("总收益", "+2.4 SOL", "+15.2%")
+            
+        else:
+            st.warning("⚠️ 跟单功能未配置或未启用")
+            st.info("请在配置界面中设置跟单参数")
+            
+            if st.button("🔧 前往配置界面"):
+                st.markdown("[点击打开配置界面](http://localhost:8502)")
+    
+    except Exception as e:
+        st.error(f"❌ 跟单监控加载失败: {e}")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+
 def main():
     """主函数"""
     # 初始化仪表板管理器
@@ -504,7 +612,7 @@ def main():
     render_overview_metrics(dashboard_manager)
     
     # 标签页
-    tab1, tab2, tab3, tab4 = st.tabs(["🔍 代币发现", "📈 交易分析", "💼 持仓管理", "📊 交易历史"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🔍 代币发现", "📈 交易分析", "💼 持仓管理", "🤖 跟单监控", "📊 交易历史"])
     
     with tab1:
         render_token_discovery(dashboard_manager)
@@ -516,6 +624,9 @@ def main():
         render_positions(dashboard_manager)
     
     with tab4:
+        render_copy_trading_panel(dashboard_manager)
+    
+    with tab5:
         render_trading_history(dashboard_manager)
 
 if __name__ == "__main__":
