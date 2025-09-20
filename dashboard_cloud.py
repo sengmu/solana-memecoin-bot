@@ -70,7 +70,7 @@ class CloudDashboardManager:
     
     def get_discovered_tokens(self):
         """Get discovered tokens data (mock data for demo)"""
-        # Mock data for demonstration
+        # Mock data for demonstration - 10 popular memecoins
         mock_tokens = [
             {
                 'Symbol': 'PEPE',
@@ -107,13 +107,97 @@ class CloudDashboardManager:
                 'RugCheck Score': 72.1,
                 'Status': 'approved',
                 'Discovered At': '2024-01-20 16:15:00'
+            },
+            {
+                'Symbol': 'SHIB',
+                'Name': 'Shiba Inu',
+                'Address': '7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs',
+                'Price': 0.00000891,
+                'Volume24h': 3200000,
+                'FDV': 75000000,
+                'Twitter Score': 88.2,
+                'RugCheck Score': 82.4,
+                'Status': 'trading',
+                'Discovered At': '2024-01-20 17:20:00'
+            },
+            {
+                'Symbol': 'FLOKI',
+                'Name': 'Floki Inu',
+                'Address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB264',
+                'Price': 0.00000345,
+                'Volume24h': 1500000,
+                'FDV': 25000000,
+                'Twitter Score': 79.6,
+                'RugCheck Score': 75.3,
+                'Status': 'approved',
+                'Discovered At': '2024-01-20 18:10:00'
+            },
+            {
+                'Symbol': 'WOJAK',
+                'Name': 'Wojak Token',
+                'Address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB265',
+                'Price': 0.00001567,
+                'Volume24h': 2800000,
+                'FDV': 45000000,
+                'Twitter Score': 82.1,
+                'RugCheck Score': 79.8,
+                'Status': 'trading',
+                'Discovered At': '2024-01-20 19:05:00'
+            },
+            {
+                'Symbol': 'CHAD',
+                'Name': 'Chad Token',
+                'Address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB266',
+                'Price': 0.00000789,
+                'Volume24h': 1200000,
+                'FDV': 20000000,
+                'Twitter Score': 74.3,
+                'RugCheck Score': 71.2,
+                'Status': 'approved',
+                'Discovered At': '2024-01-20 20:15:00'
+            },
+            {
+                'Symbol': 'KEKW',
+                'Name': 'Kekw Token',
+                'Address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB267',
+                'Price': 0.00000456,
+                'Volume24h': 950000,
+                'FDV': 15000000,
+                'Twitter Score': 68.9,
+                'RugCheck Score': 65.4,
+                'Status': 'pending',
+                'Discovered At': '2024-01-20 21:30:00'
+            },
+            {
+                'Symbol': 'MOON',
+                'Name': 'Moon Token',
+                'Address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB268',
+                'Price': 0.00001987,
+                'Volume24h': 4100000,
+                'FDV': 80000000,
+                'Twitter Score': 91.7,
+                'RugCheck Score': 86.3,
+                'Status': 'trading',
+                'Discovered At': '2024-01-20 22:45:00'
+            },
+            {
+                'Symbol': 'DEGEN',
+                'Name': 'Degen Token',
+                'Address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB269',
+                'Price': 0.00001123,
+                'Volume24h': 2200000,
+                'FDV': 35000000,
+                'Twitter Score': 77.4,
+                'RugCheck Score': 73.6,
+                'Status': 'approved',
+                'Discovered At': '2024-01-20 23:20:00'
             }
         ]
         return pd.DataFrame(mock_tokens)
     
     def get_trades_data(self):
         """Get trades data (mock data for demo)"""
-        # Mock data for demonstration
+        # Mock data for demonstration - more trading activity
         mock_trades = [
             {
                 'Timestamp': '2024-01-20 14:30:00',
@@ -144,24 +228,158 @@ class CloudDashboardManager:
                 'Success': True,
                 'Confidence': 78.2,
                 'Reason': 'Profit target reached'
+            },
+            {
+                'Timestamp': '2024-01-20 17:20:00',
+                'Type': 'BUY',
+                'Symbol': 'SHIB',
+                'Amount': 0.8,
+                'Price': 0.00000850,
+                'Success': True,
+                'Confidence': 88.2,
+                'Reason': 'Strong community and volume'
+            },
+            {
+                'Timestamp': '2024-01-20 18:10:00',
+                'Type': 'BUY',
+                'Symbol': 'FLOKI',
+                'Amount': 0.6,
+                'Price': 0.00000320,
+                'Success': True,
+                'Confidence': 79.6,
+                'Reason': 'Good Twitter engagement'
+            },
+            {
+                'Timestamp': '2024-01-20 19:05:00',
+                'Type': 'BUY',
+                'Symbol': 'WOJAK',
+                'Amount': 0.4,
+                'Price': 0.00001500,
+                'Success': True,
+                'Confidence': 82.1,
+                'Reason': 'High RugCheck score'
+            },
+            {
+                'Timestamp': '2024-01-20 20:15:00',
+                'Type': 'BUY',
+                'Symbol': 'CHAD',
+                'Amount': 0.3,
+                'Price': 0.00000750,
+                'Success': False,
+                'Confidence': 74.3,
+                'Reason': 'Slippage too high'
+            },
+            {
+                'Timestamp': '2024-01-20 21:30:00',
+                'Type': 'BUY',
+                'Symbol': 'KEKW',
+                'Amount': 0.2,
+                'Price': 0.00000420,
+                'Success': True,
+                'Confidence': 68.9,
+                'Reason': 'Low confidence but small position'
+            },
+            {
+                'Timestamp': '2024-01-20 22:45:00',
+                'Type': 'BUY',
+                'Symbol': 'MOON',
+                'Amount': 0.7,
+                'Price': 0.00001900,
+                'Success': True,
+                'Confidence': 91.7,
+                'Reason': 'Excellent scores across all metrics'
+            },
+            {
+                'Timestamp': '2024-01-20 23:20:00',
+                'Type': 'BUY',
+                'Symbol': 'DEGEN',
+                'Amount': 0.5,
+                'Price': 0.00001080,
+                'Success': True,
+                'Confidence': 77.4,
+                'Reason': 'Moderate confidence, good volume'
+            },
+            {
+                'Timestamp': '2024-01-21 08:15:00',
+                'Type': 'SELL',
+                'Symbol': 'DOGE',
+                'Amount': 1.0,
+                'Price': 0.00004650,
+                'Success': True,
+                'Confidence': 92.3,
+                'Reason': 'Take profit at 3.3% gain'
+            },
+            {
+                'Timestamp': '2024-01-21 09:30:00',
+                'Type': 'SELL',
+                'Symbol': 'SHIB',
+                'Amount': 0.8,
+                'Price': 0.00000920,
+                'Success': True,
+                'Confidence': 88.2,
+                'Reason': '8.2% profit target reached'
             }
         ]
         return pd.DataFrame(mock_trades)
     
     def get_positions_data(self):
         """Get current positions data (mock data for demo)"""
-        # Mock data for demonstration
+        # Mock data for demonstration - current active positions
         mock_positions = [
             {
-                'Symbol': 'DOGE',
-                'Address': '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',
-                'Amount': 1.0,
-                'Entry Price': 0.00004500,
-                'Current Price': 0.00004567,
-                'P&L': 0.00067,
-                'P&L %': 1.49,
-                'Hold Time': 2.5,
-                'Confidence': 92.3
+                'Symbol': 'FLOKI',
+                'Address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB264',
+                'Amount': 0.6,
+                'Entry Price': 0.00000320,
+                'Current Price': 0.00000345,
+                'P&L': 0.00015,
+                'P&L %': 7.81,
+                'Hold Time': 3.2,
+                'Confidence': 79.6
+            },
+            {
+                'Symbol': 'WOJAK',
+                'Address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB265',
+                'Amount': 0.4,
+                'Entry Price': 0.00001500,
+                'Current Price': 0.00001567,
+                'P&L': 0.000268,
+                'P&L %': 4.47,
+                'Hold Time': 2.8,
+                'Confidence': 82.1
+            },
+            {
+                'Symbol': 'KEKW',
+                'Address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB267',
+                'Amount': 0.2,
+                'Entry Price': 0.00000420,
+                'Current Price': 0.00000456,
+                'P&L': 0.000072,
+                'P&L %': 8.57,
+                'Hold Time': 1.5,
+                'Confidence': 68.9
+            },
+            {
+                'Symbol': 'MOON',
+                'Address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB268',
+                'Amount': 0.7,
+                'Entry Price': 0.00001900,
+                'Current Price': 0.00001987,
+                'P&L': 0.000609,
+                'P&L %': 4.58,
+                'Hold Time': 4.1,
+                'Confidence': 91.7
+            },
+            {
+                'Symbol': 'DEGEN',
+                'Address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB269',
+                'Amount': 0.5,
+                'Entry Price': 0.00001080,
+                'Current Price': 0.00001123,
+                'P&L': 0.000215,
+                'P&L %': 3.98,
+                'Hold Time': 2.3,
+                'Confidence': 77.4
             },
             {
                 'Symbol': 'BONK',
@@ -171,7 +389,7 @@ class CloudDashboardManager:
                 'Current Price': 0.00001234,
                 'P&L': 0.000272,
                 'P&L %': 2.83,
-                'Hold Time': 1.2,
+                'Hold Time': 5.2,
                 'Confidence': 76.8
             }
         ]
@@ -179,11 +397,18 @@ class CloudDashboardManager:
     
     def get_safety_data(self):
         """Get RugCheck safety analysis data (mock data for demo)"""
-        # Mock data for demonstration
+        # Mock data for demonstration - all 10 tokens
         mock_safety = [
             {'Symbol': 'PEPE', 'RugCheck Score': 78.2, 'Status': 'approved'},
             {'Symbol': 'DOGE', 'RugCheck Score': 88.7, 'Status': 'trading'},
-            {'Symbol': 'BONK', 'RugCheck Score': 72.1, 'Status': 'approved'}
+            {'Symbol': 'BONK', 'RugCheck Score': 72.1, 'Status': 'approved'},
+            {'Symbol': 'SHIB', 'RugCheck Score': 82.4, 'Status': 'trading'},
+            {'Symbol': 'FLOKI', 'RugCheck Score': 75.3, 'Status': 'approved'},
+            {'Symbol': 'WOJAK', 'RugCheck Score': 79.8, 'Status': 'trading'},
+            {'Symbol': 'CHAD', 'RugCheck Score': 71.2, 'Status': 'approved'},
+            {'Symbol': 'KEKW', 'RugCheck Score': 65.4, 'Status': 'pending'},
+            {'Symbol': 'MOON', 'RugCheck Score': 86.3, 'Status': 'trading'},
+            {'Symbol': 'DEGEN', 'RugCheck Score': 73.6, 'Status': 'approved'}
         ]
         return pd.DataFrame(mock_safety)
 
