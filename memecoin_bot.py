@@ -39,26 +39,34 @@ class MemecoinData:
 
 
 def parse_number(text: str) -> float:
-    """Parse number strings like '1.2M', '$1,000,000', '500K' to float"""
+    """Parse number strings like '1.2M', '$1,000,000', '500K' to float with regex"""
     if not text or text == '':
         return 0.0
     
     # Convert to string if not already
     text = str(text)
     
-    # Remove common prefixes and suffixes
-    text = text.replace('$', '').replace(',', '').upper().strip()
+    # Use regex to clean the text - keep only digits, dots, K, M, B, $, %
+    import re
+    text = re.sub(r'[^\d. KM B$%]', '', text.upper())
+    
+    # Remove % if present
+    if '%' in text:
+        text = text.replace('%', '')
+    
+    # Remove $ and commas
+    text = text.replace('$', '').replace(',', '').strip()
     
     if not text or text == '0':
         return 0.0
     
     try:
         if 'K' in text:
-            return float(text.replace('K', '')) * 1000
+            return float(re.sub(r'K', '', text)) * 1000
         elif 'M' in text:
-            return float(text.replace('M', '')) * 1000000
+            return float(re.sub(r'M', '', text)) * 1000000
         elif 'B' in text:
-            return float(text.replace('B', '')) * 1000000000
+            return float(re.sub(r'B', '', text)) * 1000000000
         else:
             return float(text)
     except (ValueError, TypeError):
@@ -74,17 +82,17 @@ def extract_memecoins(pairs: List[Dict[str, Any]]) -> List[MemecoinData]:
             continue
             
         try:
-            # Parse string numbers to floats
-            volume_24h = parse_number(pair.get('volume', {}).get('h24', '0'))
-            fdv = parse_number(pair.get('fdv', '0'))
-            price_change_24h = float(pair.get('priceChange', {}).get('h24', 0))
-            price = float(pair.get('priceUsd', 0))
+            # Parse string numbers to floats using parse_number
+            volume_24h = parse_number(str(pair.get('volume', {}).get('h24', '0')))
+            fdv = parse_number(str(pair.get('fdv', '0')))
+            price_change_24h = parse_number(str(pair.get('priceChange', {}).get('h24', '0')))
+            price = parse_number(str(pair.get('priceUsd', '0')))
             
-            # Handle social engagement
+            # Handle social engagement - use placeholder if not available
             socials = pair.get('socials', [])
-            social_engagement = 0
+            social_engagement = 10000  # Placeholder value
             if socials and len(socials) > 0:
-                social_engagement = int(socials[0].get('followers', 0))
+                social_engagement = int(socials[0].get('followers', 10000))
             
             memecoin = MemecoinData(
                 symbol=pair['baseToken'].get('symbol', 'UNKNOWN'),
@@ -111,26 +119,20 @@ def filter_and_sort_memecoins(
     min_fdv: float = 0, 
     min_engagement: int = 0
 ) -> List[MemecoinData]:
-    """Filter and sort memecoins with safe comparisons."""
+    """Filter and sort memecoins with safe comparisons using parse_number."""
     if not memecoins:
         return []
     
-    filtered = []
-    for m in memecoins:
-        try:
-            # Safe comparison with type conversion
-            volume_ok = float(m.volume_24h) >= min_volume
-            fdv_ok = float(m.fdv) >= min_fdv
-            engagement_ok = int(m.social_engagement) >= min_engagement
-            
-            if volume_ok and fdv_ok and engagement_ok:
-                filtered.append(m)
-        except (ValueError, TypeError) as e:
-            logging.warning(f"Error filtering memecoin {m.symbol}: {e}")
-            continue  # Skip bad data
+    # Use list comprehension with parse_number for safe filtering
+    filtered = [
+        m for m in memecoins 
+        if parse_number(str(m.volume_24h)) >= min_volume 
+        and parse_number(str(m.fdv)) >= min_fdv 
+        and m.social_engagement >= min_engagement
+    ]
     
-    # Sort by volume (descending)
-    return sorted(filtered, key=lambda x: float(x.volume_24h), reverse=True)
+    # Sort by volume (descending) using parse_number
+    return sorted(filtered, key=lambda x: parse_number(str(x.volume_24h)), reverse=True)
 
 
 # Test function

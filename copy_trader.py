@@ -192,7 +192,7 @@ class CopyTrader:
                 
                 # 等待一段时间再检查
                 await asyncio.sleep(5)
-                
+            
             except Exception as e:
                 logger.error(f"监控钱包交易失败: {e}")
                 await asyncio.sleep(10)
@@ -228,7 +228,7 @@ class CopyTrader:
                 logger.info(f"跟单成功: {trade_info['type'].value} {trade_info['token_address']}")
             else:
                 logger.warning(f"跟单失败: {trade_info['type'].value} {trade_info['token_address']}")
-                
+            
         except Exception as e:
             logger.error(f"处理交易失败: {e}")
     
@@ -250,7 +250,7 @@ class CopyTrader:
         except Exception as e:
             logger.error(f"分析交易失败: {e}")
             return None
-    
+            
     def calculate_copy_amount(self, leader_amount: float) -> float:
         """计算跟单金额"""
         try:
@@ -264,7 +264,7 @@ class CopyTrader:
         except Exception as e:
             logger.error(f"计算跟单金额失败: {e}")
             return 0.0
-    
+            
     async def start_monitoring(self):
         """开始监控"""
         if not self.copy_trading_enabled:

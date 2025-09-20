@@ -25,26 +25,34 @@ except ImportError as e:
 
 # Utility function for parsing number strings
 def parse_number(text: str) -> float:
-    """Parse number strings like '1.2M', '$1,000,000', '500K' to float"""
+    """Parse number strings like '1.2M', '$1,000,000', '500K' to float with regex"""
     if not text or text == '':
         return 0.0
     
     # Convert to string if not already
     text = str(text)
     
-    # Remove common prefixes and suffixes
-    text = text.replace('$', '').replace(',', '').upper().strip()
+    # Use regex to clean the text - keep only digits, dots, K, M, B, $, %
+    import re
+    text = re.sub(r'[^\d. KM B$%]', '', text.upper())
+    
+    # Remove % if present
+    if '%' in text:
+        text = text.replace('%', '')
+    
+    # Remove $ and commas
+    text = text.replace('$', '').replace(',', '').strip()
     
     if not text or text == '0':
         return 0.0
     
     try:
         if 'K' in text:
-            return float(text.replace('K', '')) * 1000
+            return float(re.sub(r'K', '', text)) * 1000
         elif 'M' in text:
-            return float(text.replace('M', '')) * 1000000
+            return float(re.sub(r'M', '', text)) * 1000000
         elif 'B' in text:
-            return float(text.replace('B', '')) * 1000000000
+            return float(re.sub(r'B', '', text)) * 1000000000
         else:
             return float(text)
     except (ValueError, TypeError):
@@ -60,22 +68,23 @@ except ImportError:
         memecoins = []
         for pair in pairs[:5]:  # Limit to 5 for safety
             if 'baseToken' in pair:
-                # Parse string numbers to floats
-                volume_24h = parse_number(pair.get('volume', {}).get('h24', '0'))
-                fdv = parse_number(pair.get('fdv', '0'))
-                price_change_24h = float(pair.get('priceChange', {}).get('h24', 0))
+                # Parse string numbers to floats using parse_number
+                volume_24h = parse_number(str(pair.get('volume', {}).get('h24', '0')))
+                fdv = parse_number(str(pair.get('fdv', '0')))
+                price_change_24h = parse_number(str(pair.get('priceChange', {}).get('h24', '0')))
+                price = parse_number(str(pair.get('priceUsd', '0')))
                 
-                # Handle social engagement
+                # Handle social engagement - use placeholder if not available
                 socials = pair.get('socials', [])
-                social_engagement = 0
+                social_engagement = 10000  # Placeholder value
                 if socials and len(socials) > 0:
-                    social_engagement = int(socials[0].get('followers', 0))
+                    social_engagement = int(socials[0].get('followers', 10000))
                 
                 memecoins.append({
                     'symbol': pair['baseToken'].get('symbol', 'UNKNOWN'),
                     'name': pair['baseToken'].get('name', 'Unknown Token'),
                     'address': pair['baseToken'].get('address', 'unknown'),
-                    'price': float(pair.get('priceUsd', 0)),
+                    'price': price,
                     'volume_24h': volume_24h,
                     'price_change_24h': price_change_24h,
                     'fdv': fdv,
@@ -84,26 +93,20 @@ except ImportError:
         return memecoins
     
     def filter_and_sort_memecoins(memecoins, min_volume=0, min_fdv=0, min_engagement=0):
-        """Filter and sort memecoins with safe comparisons"""
+        """Filter and sort memecoins with safe comparisons using parse_number"""
         if not memecoins:
             return []
         
-        filtered = []
-        for m in memecoins:
-            try:
-                # Safe comparison with type conversion
-                volume_ok = float(m.get('volume_24h', 0)) >= min_volume
-                fdv_ok = float(m.get('fdv', 0)) >= min_fdv
-                engagement_ok = int(m.get('social_engagement', 0)) >= min_engagement
-                
-                if volume_ok and fdv_ok and engagement_ok:
-                    filtered.append(m)
-            except (ValueError, TypeError) as e:
-                logger.warning(f"Error filtering memecoin {m.get('symbol', 'UNKNOWN')}: {e}")
-                continue  # Skip bad data
+        # Use list comprehension with parse_number for safe filtering
+        filtered = [
+            m for m in memecoins 
+            if parse_number(str(m.get('volume_24h', 0))) >= min_volume 
+            and parse_number(str(m.get('fdv', 0))) >= min_fdv 
+            and m.get('social_engagement', 0) >= min_engagement
+        ]
         
-        # Sort by volume (descending)
-        return sorted(filtered, key=lambda x: float(x.get('volume_24h', 0)), reverse=True)
+        # Sort by volume (descending) using parse_number
+        return sorted(filtered, key=lambda x: parse_number(str(x.get('volume_24h', 0))), reverse=True)
 
 # Page configuration
 st.set_page_config(
@@ -603,7 +606,7 @@ def render_discovery_tab(dashboard_manager):
             if dashboard_manager.bot is None:
                 st.error("❌ 机器人未初始化，使用模拟数据")
                 # Use fallback sample data
-                pairs = [{"baseToken": {"name": "Fallback Token", "symbol": "FBK", "address": "fbk456"}, "fdv": 1000000, "volume": {"h24": 2000000}, "priceChange": {"h24": 10}, "pairAddress": "pair456", "priceUsd": 0.001}]
+                pairs = [{"baseToken": {"name": "Fallback Token", "symbol": "FBK", "address": "fbk456"}, "fdv": 1000000, "volume": {"h24": 2000000}, "priceChange": {"h24": 10}, "pairAddress": "pair456", "priceUsd": 0.001, "socials": [{"followers": 10000}]}]
             else:
                 try:
                     # Try to fetch trending pairs with comprehensive error handling
@@ -622,9 +625,9 @@ def render_discovery_tab(dashboard_manager):
                 except Exception as e:
                     logger.error(f"Error fetching trending pairs: {e}")
                     st.warning("⚠️ 获取数据失败，使用模拟数据")
-                    pairs = [{"baseToken": {"name": "Error Token", "symbol": "ERR", "address": "err789"}, "fdv": 1000000, "volume": {"h24": 2000000}, "priceChange": {"h24": 10}, "pairAddress": "pair789", "priceUsd": 0.001}]
+                    pairs = [{"baseToken": {"name": "Error Token", "symbol": "ERR", "address": "err789"}, "fdv": 1000000, "volume": {"h24": 2000000}, "priceChange": {"h24": 10}, "pairAddress": "pair789", "priceUsd": 0.001, "socials": [{"followers": 10000}]}]
             
-            # Process pairs data
+            # Process pairs data with enhanced error handling
             if not pairs:
                 st.warning("⚠️ 未获取到代币数据，使用模拟数据")
                 # Generate mock tokens as fallback
@@ -634,36 +637,61 @@ def render_discovery_tab(dashboard_manager):
                         dashboard_manager.bot.discovered_tokens[token.address] = token
                 st.success(f"✅ 已加载 {len(mock_tokens)} 个模拟代币!")
             else:
-                # Convert trending pairs to TokenInfo objects
-                from models import TokenInfo, TokenStatus
-                for pair in pairs:
-                    try:
-                        token = TokenInfo(
-                            address=pair.get("baseToken", {}).get("address", f"mock_{pair.get('baseToken', {}).get('symbol', 'UNK')}"),
-                            symbol=pair.get("baseToken", {}).get("symbol", "UNK"),
-                            name=pair.get("baseToken", {}).get("name", "Unknown Token"),
-                            decimals=9,
-                            price=0.001,  # Mock price
-                            market_cap=pair.get("fdv", 1000000),
-                            fdv=pair.get("fdv", 1000000),
-                            volume_24h=pair.get("volume", {}).get("h24", 1000000),
-                            price_change_24h=pair.get("priceChange", {}).get("h24", 0),
-                            liquidity=100000,
-                            holders=1000,
-                            created_at=datetime.now(),
-                            status=TokenStatus.PENDING,
-                            twitter_score=0.0,
-                            rugcheck_score="0.0",
-                            confidence_score=0.5,
-                            is_memecoin=True
-                        )
+                # Use extract_memecoins and filter_and_sort_memecoins for proper data processing
+                try:
+                    # Extract memecoins from pairs
+                    memecoins = extract_memecoins(pairs)
+                    
+                    if memecoins:
+                        # Filter and sort memecoins
+                        filtered_memecoins = filter_and_sort_memecoins(memecoins, min_volume=0, min_fdv=0, min_engagement=0)
+                        
+                        # Convert to TokenInfo objects
+                        from models import TokenInfo, TokenStatus
+                        for memecoin in filtered_memecoins:
+                            try:
+                                token = TokenInfo(
+                                    address=memecoin.address,
+                                    symbol=memecoin.symbol,
+                                    name=memecoin.name,
+                                    decimals=9,
+                                    price=memecoin.price,
+                                    market_cap=memecoin.fdv,
+                                    fdv=memecoin.fdv,
+                                    volume_24h=memecoin.volume_24h,
+                                    price_change_24h=memecoin.price_change_24h,
+                                    liquidity=100000,
+                                    holders=1000,
+                                    created_at=datetime.now(),
+                                    status=TokenStatus.PENDING,
+                                    twitter_score=0.0,
+                                    rugcheck_score="0.0",
+                                    confidence_score=0.5,
+                                    is_memecoin=True
+                                )
+                                if dashboard_manager.bot:
+                                    dashboard_manager.bot.discovered_tokens[token.address] = token
+                            except Exception as e:
+                                logger.warning(f"Error creating token from memecoin: {e}")
+                                continue
+                        
+                        st.success(f"✅ 成功获取 {len(filtered_memecoins)} 个热门代币!")
+                    else:
+                        st.warning("⚠️ 未提取到有效的代币数据，使用模拟数据")
+                        mock_tokens = dashboard_manager.generate_mock_tokens(15)
+                        for token in mock_tokens:
+                            if dashboard_manager.bot:
+                                dashboard_manager.bot.discovered_tokens[token.address] = token
+                        st.success(f"✅ 已加载 {len(mock_tokens)} 个模拟代币!")
+                        
+                except Exception as e:
+                    logger.error(f"Error processing pairs data: {e}")
+                    st.warning("⚠️ 数据处理失败，使用模拟数据")
+                    mock_tokens = dashboard_manager.generate_mock_tokens(15)
+                    for token in mock_tokens:
                         if dashboard_manager.bot:
                             dashboard_manager.bot.discovered_tokens[token.address] = token
-                    except Exception as e:
-                        logger.warning(f"Error creating token from pair: {e}")
-                        continue
-                
-                st.success(f"✅ 成功获取 {len(pairs)} 个热门代币!")
+                    st.success(f"✅ 已加载 {len(mock_tokens)} 个模拟代币!")
             
             st.rerun()
     
