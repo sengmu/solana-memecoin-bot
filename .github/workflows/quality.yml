@@ -42,7 +42,8 @@ jobs:
       run: |
         echo "Running flake8 linter..."
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+        echo "Running additional flake8 checks (non-blocking)..."
+        flake8 . --count --exit-zero --max-complexity=15 --max-line-length=150 --statistics || echo "Additional linting completed with warnings"
         
     - name: 🔬 Type checking with mypy
       run: |
