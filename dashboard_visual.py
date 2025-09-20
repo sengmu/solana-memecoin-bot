@@ -315,40 +315,7 @@ class VisualDashboardManager:
     def initialize_bot(self):
         """初始化机器人"""
         try:
-            from models import BotConfig
-            config = BotConfig(
-                # Solana Configuration
-                solana_rpc_url="https://api.mainnet-beta.solana.com",
-                solana_ws_url="wss://api.mainnet-beta.solana.com",
-                private_key="your_wallet_private_key_here",
-                
-                # Trading Configuration
-                max_position_size=1.0,
-                min_volume_24h=1000000,
-                min_fdv=100000,
-                max_slippage=0.05,
-                default_slippage=0.02,
-                
-                # Twitter Configuration
-                twitter_bearer_token="your_twitter_bearer_token_here",
-                
-                # Copy Trading
-                leader_wallet_address="your_leader_wallet_address_here",
-                copy_trading_enabled=False,
-                min_confidence_score=70.0,
-                
-                # Logging
-                log_level="INFO",
-                log_to_file=True,
-                
-                # Risk Management
-                max_daily_loss=0.1,
-                stop_loss_percentage=0.05,
-                take_profit_percentage=0.2,
-                
-                # Memecoin Keywords
-                meme_keywords=['meme', 'pepe', 'doge', 'shib', 'floki', 'bonk']
-            )
+            # Use the new BotConfig with default values
             self.bot = type('MockBot', (), {
                 'running': True,
                 'discovered_tokens': {},
