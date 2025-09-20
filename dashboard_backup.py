@@ -316,7 +316,7 @@ def render_discovery_tab(dashboard: DashboardManager):
     st.subheader(f"发现的代币 ({len(filtered_df)} 个)")
     st.dataframe(
         filtered_df,
-        use_container_width=True,
+        width='stretch',
         height=400
     )
     
@@ -332,7 +332,7 @@ def render_discovery_tab(dashboard: DashboardManager):
                 title="Volume 24h Distribution",
                 labels={'value': 'Volume 24h ($)', 'count': 'Number of Tokens'}
             )
-            st.plotly_chart(fig_volume, use_container_width=True)
+            st.plotly_chart(fig_volume, width='stretch')
         
         with col2:
             # Status distribution
@@ -342,7 +342,7 @@ def render_discovery_tab(dashboard: DashboardManager):
                 names=status_counts.index,
                 title="Token Status Distribution"
             )
-            st.plotly_chart(fig_status, use_container_width=True)
+            st.plotly_chart(fig_status, width='stretch')
 
 def render_trades_tab(dashboard: DashboardManager):
     """Render the Trades tab."""
@@ -405,7 +405,7 @@ def render_trades_tab(dashboard: DashboardManager):
     st.subheader(f"交易记录 ({len(filtered_trades)} 条)")
     st.dataframe(
         filtered_trades,
-        use_container_width=True,
+        width='stretch',
         height=400
     )
     
@@ -425,7 +425,7 @@ def render_trades_tab(dashboard: DashboardManager):
                 title="Trading Volume Over Time",
                 labels={'Amount': 'Volume (SOL)', 'Timestamp': 'Date'}
             )
-            st.plotly_chart(fig_volume, use_container_width=True)
+            st.plotly_chart(fig_volume, width='stretch')
         
         with col2:
             # Success rate by type
@@ -440,7 +440,7 @@ def render_trades_tab(dashboard: DashboardManager):
                 title="Success Rate by Trade Type",
                 labels={'Success': 'Success Rate (%)', 'Type': 'Trade Type'}
             )
-            st.plotly_chart(fig_success, use_container_width=True)
+            st.plotly_chart(fig_success, width='stretch')
 
 def render_positions_tab(dashboard: DashboardManager):
     """Render the Positions tab."""
@@ -477,7 +477,7 @@ def render_positions_tab(dashboard: DashboardManager):
     st.subheader("持仓详情")
     st.dataframe(
         positions_df,
-        use_container_width=True,
+        width='stretch',
         height=400
     )
     
@@ -493,7 +493,7 @@ def render_positions_tab(dashboard: DashboardManager):
                 title="Position Confidence Distribution",
                 labels={'value': 'Confidence (%)', 'count': 'Number of Positions'}
             )
-            st.plotly_chart(fig_confidence, use_container_width=True)
+            st.plotly_chart(fig_confidence, width='stretch')
         
         with col2:
             # Hold time distribution
@@ -503,7 +503,7 @@ def render_positions_tab(dashboard: DashboardManager):
                 title="Hold Time Distribution",
                 labels={'value': 'Hold Time (hours)', 'count': 'Number of Positions'}
             )
-            st.plotly_chart(fig_hold, use_container_width=True)
+            st.plotly_chart(fig_hold, width='stretch')
 
 def render_safety_tab(dashboard: DashboardManager):
     """Render the Safety tab."""
@@ -552,7 +552,7 @@ def render_safety_tab(dashboard: DashboardManager):
                 title="RugCheck Safety Ratings Distribution",
                 color_discrete_sequence=px.colors.qualitative.Set3
             )
-            st.plotly_chart(fig_pie, use_container_width=True)
+            st.plotly_chart(fig_pie, width='stretch')
     
     with col2:
         # Safety recommendations

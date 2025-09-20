@@ -173,8 +173,36 @@ class VisualDashboardManager:
         try:
             from models import BotConfig
             config = BotConfig(
+                # Solana Configuration
+                solana_rpc_url="https://api.mainnet-beta.solana.com",
+                solana_ws_url="wss://api.mainnet-beta.solana.com",
+                private_key="your_wallet_private_key_here",
+                
+                # Trading Configuration
+                max_position_size=1.0,
                 min_volume_24h=1000000,
                 min_fdv=100000,
+                max_slippage=0.05,
+                default_slippage=0.02,
+                
+                # Twitter Configuration
+                twitter_bearer_token="your_twitter_bearer_token_here",
+                
+                # Copy Trading
+                leader_wallet_address="your_leader_wallet_address_here",
+                copy_trading_enabled=False,
+                min_confidence_score=70.0,
+                
+                # Logging
+                log_level="INFO",
+                log_to_file=True,
+                
+                # Risk Management
+                max_daily_loss=0.1,
+                stop_loss_percentage=0.05,
+                take_profit_percentage=0.2,
+                
+                # Memecoin Keywords
                 meme_keywords=['meme', 'pepe', 'doge', 'shib', 'floki', 'bonk']
             )
             self.bot = type('MockBot', (), {
@@ -342,7 +370,7 @@ def render_token_discovery(dashboard_manager):
     # 显示表格
     st.dataframe(
         filtered_df,
-        use_container_width=True,
+        width='stretch',
         column_config={
             "price": st.column_config.NumberColumn("价格", format="$%.8f"),
             "volume_24h": st.column_config.NumberColumn("24h交易量", format="$%.0f"),
@@ -380,7 +408,7 @@ def render_trading_charts(dashboard_manager):
             yaxis_title="价格变化 (%)",
             height=400
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
         
         st.markdown('</div>', unsafe_allow_html=True)
     
@@ -395,7 +423,7 @@ def render_trading_charts(dashboard_manager):
             title="代币交易量分布"
         )
         fig.update_layout(height=400)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
         
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -411,7 +439,7 @@ def render_positions(dashboard_manager):
         # 持仓表格
         st.dataframe(
             positions_df,
-            use_container_width=True,
+            width='stretch',
             column_config={
                 "amount": st.column_config.NumberColumn("数量", format="%.4f"),
                 "entry_price": st.column_config.NumberColumn("入场价格", format="$%.8f"),
@@ -435,7 +463,7 @@ def render_positions(dashboard_manager):
             yaxis_title="盈亏 (%)",
             height=300
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
         
         st.markdown('</div>', unsafe_allow_html=True)
     else:
@@ -453,7 +481,7 @@ def render_trading_history(dashboard_manager):
     # 交易历史表格
     st.dataframe(
         trades_df,
-        use_container_width=True,
+        width='stretch',
         column_config={
             "amount": st.column_config.NumberColumn("数量", format="%.4f"),
             "price": st.column_config.NumberColumn("价格", format="$%.8f"),
@@ -475,7 +503,7 @@ def render_trading_history(dashboard_manager):
         yaxis_title="盈亏 ($)",
         height=400
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
     
     st.markdown('</div>', unsafe_allow_html=True)
 

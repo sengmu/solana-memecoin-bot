@@ -314,7 +314,7 @@ def render_discovery_tab(dashboard_manager):
     if not filtered_df.empty:
         st.dataframe(
             filtered_df,
-            use_container_width=True,
+            width='stretch',
             column_config={
                 "Price": st.column_config.NumberColumn("价格", format="$%.6f"),
                 "Volume24h": st.column_config.NumberColumn("24h交易量", format="$%.0f"),
@@ -338,7 +338,7 @@ def render_discovery_tab(dashboard_manager):
                 color_continuous_scale='Viridis'
             )
             fig_volume.update_layout(xaxis_tickangle=-45)
-            st.plotly_chart(fig_volume, use_container_width=True)
+            st.plotly_chart(fig_volume, width='stretch')
         
         with col2:
             # Status distribution
@@ -348,7 +348,7 @@ def render_discovery_tab(dashboard_manager):
                 names=status_counts.index,
                 title="代币状态分布"
             )
-            st.plotly_chart(fig_status, use_container_width=True)
+            st.plotly_chart(fig_status, width='stretch')
     else:
         st.info("没有符合条件的代币。")
 
@@ -423,7 +423,7 @@ def render_trades_tab(dashboard_manager):
     if not filtered_trades.empty:
         st.dataframe(
             filtered_trades,
-            use_container_width=True,
+            width='stretch',
             column_config={
                 "Amount": st.column_config.NumberColumn("数量", format="%.4f SOL"),
                 "Price": st.column_config.NumberColumn("价格", format="$%.6f"),
@@ -445,7 +445,7 @@ def render_trades_tab(dashboard_manager):
                     title="交易量趋势",
                     markers=True
                 )
-                st.plotly_chart(fig_pnl, use_container_width=True)
+                st.plotly_chart(fig_pnl, width='stretch')
         
         with col2:
             # Success rate by type
@@ -456,7 +456,7 @@ def render_trades_tab(dashboard_manager):
                 title="各类型交易成功率",
                 labels={'x': '交易类型', 'y': '成功率 (%)'}
             )
-            st.plotly_chart(fig_success, use_container_width=True)
+            st.plotly_chart(fig_success, width='stretch')
     else:
         st.info("没有符合条件的交易记录。")
 
@@ -497,7 +497,7 @@ def render_positions_tab(dashboard_manager):
     if not positions_df.empty:
         st.dataframe(
             positions_df,
-            use_container_width=True,
+            width='stretch',
             column_config={
                 "Entry Price": st.column_config.NumberColumn("入场价格", format="$%.6f"),
                 "Current Price": st.column_config.NumberColumn("当前价格", format="$%.6f"),
@@ -519,7 +519,7 @@ def render_positions_tab(dashboard_manager):
                 title="盈亏分布",
                 nbins=20
             )
-            st.plotly_chart(fig_pnl, use_container_width=True)
+            st.plotly_chart(fig_pnl, width='stretch')
         
         with col2:
             # Confidence vs Hold Time
@@ -531,7 +531,7 @@ def render_positions_tab(dashboard_manager):
                 title="置信度 vs 持仓时间",
                 color_continuous_scale='RdYlGn'
             )
-            st.plotly_chart(fig_confidence, use_container_width=True)
+            st.plotly_chart(fig_confidence, width='stretch')
     else:
         st.info("没有持仓数据。")
 
@@ -595,7 +595,7 @@ def render_safety_tab(dashboard_manager):
             "危险": "#ff0000"
         }
     )
-    st.plotly_chart(fig_safety, use_container_width=True)
+    st.plotly_chart(fig_safety, width='stretch')
     
     # Safety tips
     st.subheader("安全提示")
