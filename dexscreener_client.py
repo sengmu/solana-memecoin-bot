@@ -543,7 +543,7 @@ class DexScreenerClient:
         
         except Exception as e:
             logging.error(f"Error parsing table: {e}")
-        
+            
         return token_infos
 
 

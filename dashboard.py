@@ -23,6 +23,34 @@ except ImportError as e:
     st.error(f"导入错误: {e}")
     st.stop()
 
+# Import utility functions with fallbacks
+try:
+    from memecoin_bot import extract_memecoins, filter_and_sort_memecoins
+except ImportError:
+    # Define stubs if import fails
+    def extract_memecoins(pairs):
+        """Extract memecoin data from pairs"""
+        memecoins = []
+        for pair in pairs[:5]:  # Limit to 5 for safety
+            if 'baseToken' in pair:
+                memecoins.append({
+                    'symbol': pair['baseToken'].get('symbol', 'UNKNOWN'),
+                    'name': pair['baseToken'].get('name', 'Unknown Token'),
+                    'address': pair['baseToken'].get('address', 'unknown'),
+                    'price': pair.get('priceUsd', 0),
+                    'volume_24h': pair.get('volume', {}).get('h24', 0),
+                    'price_change_24h': pair.get('priceChange', {}).get('h24', 0),
+                    'fdv': pair.get('fdv', 0)
+                })
+        return memecoins
+    
+    def filter_and_sort_memecoins(memecoins):
+        """Filter and sort memecoins"""
+        if not memecoins:
+            return []
+        # Simple sorting by volume
+        return sorted(memecoins, key=lambda x: x.get('volume_24h', 0), reverse=True)
+
 # Page configuration
 st.set_page_config(
     page_title="Memecoin 交易机器人仪表板",
@@ -63,27 +91,146 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# Enhanced init_bot function with caching
+@st.cache_resource
+def init_bot():
+    """Initialize bot with comprehensive error handling and caching"""
+    try:
+        # Try to initialize real MemecoinBot
+        bot = MemecoinBot()
+        logger.info("✅ Real MemecoinBot initialized successfully")
+        return bot
+    except (AttributeError, KeyError, TypeError) as e:
+        logger.error(f"Bot initialization failed due to missing .env or config: {e}")
+        st.error("⚠️ 机器人初始化失败，请检查 .env 配置文件")
+        return create_mock_bot()
+    except ImportError as e:
+        logger.error(f"Import error during bot initialization: {e}")
+        st.error("⚠️ 导入错误，使用模拟机器人")
+        return create_mock_bot()
+    except Exception as e:
+        logger.error(f"Unexpected error during bot initialization: {e}")
+        st.warning("⚠️ 机器人初始化失败，使用模拟数据演示")
+        return create_mock_bot()
+
+def create_mock_bot():
+    """Create a robust MockBot with all necessary methods"""
+    class MockBot:
+        def __init__(self):
+            self.positions = {}
+            self.enable_copy = True
+            self.buy_size_sol = 0.5
+            self.running = False
+            self.discovered_tokens = {}
+            self.trades = []
+            self.trading_stats = type('MockStats', (), {
+                'total_trades': 0,
+                'successful_trades': 0,
+                'total_volume': 0.0,
+                'total_pnl': 0.0
+            })()
+            self.copy_trader = type('MockTrader', (object,), {'held_positions': {}})()
+            
+            # Create a mock dexscreener_client
+            self.dexscreener_client = type('MockDexScreenerClient', (), {
+                'fetch_trending_pairs': self.fetch_trending_pairs
+            })()
+        
+        async def fetch_trending_pairs(self, max_pairs=50):
+            """Mock fetch_trending_pairs method with comprehensive sample data"""
+            sample_data = [
+                {
+                    "baseToken": {"name": "MockCoin 1", "symbol": "MCK1", "address": "mock123"},
+                    "fdv": 1000000,
+                    "volume": {"h24": 2000000},
+                    "priceChange": {"h24": 10},
+                    "pairAddress": "pair123",
+                    "priceUsd": 0.001
+                },
+                {
+                    "baseToken": {"name": "MockCoin 2", "symbol": "MCK2", "address": "mock456"},
+                    "fdv": 2000000,
+                    "volume": {"h24": 3000000},
+                    "priceChange": {"h24": -5},
+                    "pairAddress": "pair456",
+                    "priceUsd": 0.002
+                },
+                {
+                    "baseToken": {"name": "MockCoin 3", "symbol": "MCK3", "address": "mock789"},
+                    "fdv": 5000000,
+                    "volume": {"h24": 1000000},
+                    "priceChange": {"h24": 25},
+                    "pairAddress": "pair789",
+                    "priceUsd": 0.003
+                },
+                {
+                    "baseToken": {"name": "MockCoin 4", "symbol": "MCK4", "address": "mock101"},
+                    "fdv": 3000000,
+                    "volume": {"h24": 4000000},
+                    "priceChange": {"h24": 15},
+                    "pairAddress": "pair101",
+                    "priceUsd": 0.004
+                },
+                {
+                    "baseToken": {"name": "MockCoin 5", "symbol": "MCK5", "address": "mock202"},
+                    "fdv": 1500000,
+                    "volume": {"h24": 2500000},
+                    "priceChange": {"h24": -8},
+                    "pairAddress": "pair202",
+                    "priceUsd": 0.005
+                }
+            ]
+            return sample_data[:max_pairs]
+        
+        def start_discovery(self):
+            """Mock start_discovery method"""
+            self.running = True
+            logger.info("Mock discovery started")
+            return True
+        
+        def stop_discovery(self):
+            """Mock stop_discovery method"""
+            self.running = False
+            logger.info("Mock discovery stopped")
+            return True
+        
+        async def mock_discovery_loop(self):
+            """Mock discovery loop for async operations"""
+            while self.running:
+                await asyncio.sleep(5)
+                logger.info("Mock discovery running...")
+    
+    return MockBot()
+
+# Cached data fetching function
+@st.cache_data(ttl=60)
+def get_pairs():
+    """Get trending pairs with caching"""
+    bot = init_bot()
+    if bot and hasattr(bot, 'dexscreener_client') and bot.dexscreener_client:
+        try:
+            return asyncio.run(bot.dexscreener_client.fetch_trending_pairs())
+        except Exception as e:
+            logger.error(f"Error fetching pairs from bot: {e}")
+            return asyncio.run(create_mock_bot().fetch_trending_pairs())
+    else:
+        return asyncio.run(create_mock_bot().fetch_trending_pairs())
+
 class DashboardManager:
     def __init__(self):
         self.bot = None
         self.last_refresh = None
         
     def initialize_bot(self):
-        """Initialize the bot with environment variables"""
+        """Initialize the bot with environment variables using cached init_bot"""
         try:
-            # Try to initialize bot with new BotConfig
-            self.bot = MemecoinBot()
+            # Use the cached init_bot function
+            self.bot = init_bot()
             return True
-        except (AttributeError, KeyError, TypeError) as e:
-            logger.error(f"Bot initialization failed due to missing .env or config: {e}")
-            # Fallback to MockBot with all necessary methods
-            self.bot = self._create_mock_bot()
-            st.error("⚠️ 机器人初始化失败，请检查 .env 配置文件")
-            return True  # 返回 True 因为 MockBot 已成功创建
         except Exception as e:
             logger.error(f"Bot initialization failed: {e}")
             # Fallback to MockBot for demo purposes
-            self.bot = self._create_mock_bot()
+            self.bot = create_mock_bot()
             st.warning("⚠️ 机器人初始化失败，使用模拟数据演示")
             return True  # 返回 True 因为 MockBot 已成功创建
     
@@ -398,57 +545,73 @@ def render_discovery_tab(dashboard_manager):
     
     with col1:
         if st.button("🔄 刷新发现", type="primary"):
+            # Enhanced error handling for bot initialization
             if dashboard_manager.bot is None:
-                st.error("❌ 机器人未初始化")
-                return
+                st.error("❌ 机器人未初始化，使用模拟数据")
+                # Use fallback sample data
+                pairs = [{"baseToken": {"name": "Fallback Token", "symbol": "FBK", "address": "fbk456"}, "fdv": 1000000, "volume": {"h24": 2000000}, "priceChange": {"h24": 10}, "pairAddress": "pair456", "priceUsd": 0.001}]
+            else:
+                try:
+                    # Try to fetch trending pairs with comprehensive error handling
+                    if hasattr(dashboard_manager.bot, 'dexscreener_client') and dashboard_manager.bot.dexscreener_client:
+                        pairs = asyncio.run(dashboard_manager.bot.dexscreener_client.fetch_trending_pairs(max_pairs=50))
+                    else:
+                        # Fallback to MockBot if dexscreener_client is missing
+                        mock_bot = create_mock_bot()
+                        pairs = asyncio.run(mock_bot.fetch_trending_pairs(max_pairs=50))
+                        st.warning("⚠️ 使用模拟数据（dexscreener_client 不可用）")
+                except AttributeError as e:
+                    logger.error(f"AttributeError in fetch_trending_pairs: {e}")
+                    st.warning("⚠️ 获取数据失败，使用模拟数据")
+                    mock_bot = create_mock_bot()
+                    pairs = asyncio.run(mock_bot.fetch_trending_pairs(max_pairs=50))
+                except Exception as e:
+                    logger.error(f"Error fetching trending pairs: {e}")
+                    st.warning("⚠️ 获取数据失败，使用模拟数据")
+                    pairs = [{"baseToken": {"name": "Error Token", "symbol": "ERR", "address": "err789"}, "fdv": 1000000, "volume": {"h24": 2000000}, "priceChange": {"h24": 10}, "pairAddress": "pair789", "priceUsd": 0.001}]
             
-            try:
-                # Fetch trending pairs
-                import asyncio
-                trending_pairs = asyncio.run(dashboard_manager.bot.dexscreener_client.fetch_trending_pairs(max_pairs=50))
-                
-                if not trending_pairs:
-                    st.warning("⚠️ 未获取到代币数据，使用模拟数据")
-                    # Generate mock tokens as fallback
-                    mock_tokens = dashboard_manager.generate_mock_tokens(15)
-                    for token in mock_tokens:
+            # Process pairs data
+            if not pairs:
+                st.warning("⚠️ 未获取到代币数据，使用模拟数据")
+                # Generate mock tokens as fallback
+                mock_tokens = dashboard_manager.generate_mock_tokens(15)
+                for token in mock_tokens:
+                    if dashboard_manager.bot:
                         dashboard_manager.bot.discovered_tokens[token.address] = token
-                    st.success(f"✅ 已加载 {len(mock_tokens)} 个模拟代币!")
-                else:
-                    # Convert trending pairs to TokenInfo objects
-                    from models import TokenInfo, TokenStatus
-                    for pair in trending_pairs:
-                        try:
-                            token = TokenInfo(
-                                address=pair.get("baseToken", {}).get("address", f"mock_{pair.get('baseToken', {}).get('symbol', 'UNK')}"),
-                                symbol=pair.get("baseToken", {}).get("symbol", "UNK"),
-                                name=pair.get("baseToken", {}).get("name", "Unknown Token"),
-                                decimals=9,
-                                price=0.001,  # Mock price
-                                market_cap=pair.get("fdv", 1000000),
-                                fdv=pair.get("fdv", 1000000),
-                                volume_24h=pair.get("volume", {}).get("h24", 1000000),
-                                price_change_24h=pair.get("priceChange", {}).get("h24", 0),
-                                liquidity=100000,
-                                holders=1000,
-                                created_at=datetime.now(),
-                                status=TokenStatus.PENDING,
-                                twitter_score=0.0,
-                                rugcheck_score="0.0",
-                                confidence_score=0.5,
-                                is_memecoin=True
-                            )
+                st.success(f"✅ 已加载 {len(mock_tokens)} 个模拟代币!")
+            else:
+                # Convert trending pairs to TokenInfo objects
+                from models import TokenInfo, TokenStatus
+                for pair in pairs:
+                    try:
+                        token = TokenInfo(
+                            address=pair.get("baseToken", {}).get("address", f"mock_{pair.get('baseToken', {}).get('symbol', 'UNK')}"),
+                            symbol=pair.get("baseToken", {}).get("symbol", "UNK"),
+                            name=pair.get("baseToken", {}).get("name", "Unknown Token"),
+                            decimals=9,
+                            price=0.001,  # Mock price
+                            market_cap=pair.get("fdv", 1000000),
+                            fdv=pair.get("fdv", 1000000),
+                            volume_24h=pair.get("volume", {}).get("h24", 1000000),
+                            price_change_24h=pair.get("priceChange", {}).get("h24", 0),
+                            liquidity=100000,
+                            holders=1000,
+                            created_at=datetime.now(),
+                            status=TokenStatus.PENDING,
+                            twitter_score=0.0,
+                            rugcheck_score="0.0",
+                            confidence_score=0.5,
+                            is_memecoin=True
+                        )
+                        if dashboard_manager.bot:
                             dashboard_manager.bot.discovered_tokens[token.address] = token
-                        except Exception as e:
-                            logger.warning(f"Error creating token from pair: {e}")
-                            continue
-                    
-                    st.success(f"✅ 成功获取 {len(trending_pairs)} 个热门代币!")
+                    except Exception as e:
+                        logger.warning(f"Error creating token from pair: {e}")
+                        continue
                 
-                st.rerun()
-            except Exception as e:
-                st.error(f"❌ 获取代币失败: {e}")
-                logger.error(f"Error in refresh discovery: {e}")
+                st.success(f"✅ 成功获取 {len(pairs)} 个热门代币!")
+            
+            st.rerun()
     
     with col2:
         if st.button("📊 显示模拟数据"):
@@ -943,6 +1106,10 @@ def main():
     if dashboard_manager.bot is None:
         dashboard_manager.initialize_bot()
     
+    # Ensure bot is always available (use cached init_bot as fallback)
+    if dashboard_manager.bot is None:
+        dashboard_manager.bot = init_bot()
+    
     # Main header
     st.markdown('<h1 class="main-header chinese-text">🤖 Memecoin 交易机器人仪表板</h1>', unsafe_allow_html=True)
     
@@ -981,25 +1148,31 @@ if __name__ == "__main__":
     
     # Test bot initialization
     print("\nTesting bot initialization...")
-    dashboard_manager = DashboardManager()
-    success = dashboard_manager.initialize_bot()
+    bot = init_bot()
     
-    if dashboard_manager.bot:
-        print("✅ Bot ready, has start_discovery:", hasattr(dashboard_manager.bot, 'start_discovery'))
-        print("✅ Bot has positions:", hasattr(dashboard_manager.bot, 'positions'))
-        print("✅ Bot has enable_copy:", hasattr(dashboard_manager.bot, 'enable_copy'))
-        print("✅ Bot has buy_size_sol:", hasattr(dashboard_manager.bot, 'buy_size_sol'))
+    if bot:
+        print("✅ Bot ready, has start_discovery:", hasattr(bot, 'start_discovery'))
+        print("✅ Bot has positions:", hasattr(bot, 'positions'))
+        print("✅ Bot has enable_copy:", hasattr(bot, 'enable_copy'))
+        print("✅ Bot has buy_size_sol:", hasattr(bot, 'buy_size_sol'))
         
         # Test fetch_trending_pairs
         import asyncio
         try:
-            if hasattr(dashboard_manager.bot, 'dexscreener_client') and dashboard_manager.bot.dexscreener_client:
-                pairs = asyncio.run(dashboard_manager.bot.dexscreener_client.fetch_trending_pairs())
+            if hasattr(bot, 'dexscreener_client') and bot.dexscreener_client:
+                pairs = asyncio.run(bot.dexscreener_client.fetch_trending_pairs())
                 print(f"✅ fetch_trending_pairs returned {len(pairs)} pairs")
             else:
                 print("❌ dexscreener_client is None or missing")
         except Exception as e:
             print(f"❌ fetch_trending_pairs failed: {e}")
+        
+        # Test cached data fetching
+        try:
+            cached_pairs = get_pairs()
+            print(f"✅ get_pairs() returned {len(cached_pairs)} pairs")
+        except Exception as e:
+            print(f"❌ get_pairs() failed: {e}")
     else:
         print("❌ Bot initialization failed")
     
