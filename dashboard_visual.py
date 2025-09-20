@@ -115,7 +115,7 @@ class VisualDashboardManager:
         self.bot = None
         self.last_refresh = None
         self.mock_data = self.generate_mock_data()
-        
+
     def generate_mock_data(self):
         """生成模拟数据用于演示"""
         return {
@@ -311,7 +311,7 @@ class VisualDashboardManager:
                 {'symbol': 'BONK', 'amount': 0.8, 'entry_price': 0.00001200, 'current_price': 0.00001234, 'pnl': 0.000272, 'pnl_pct': 2.83},
             ]
         }
-    
+
     def initialize_bot(self):
         """初始化机器人"""
         try:
@@ -338,19 +338,19 @@ def render_header():
 def render_sidebar(dashboard_manager):
     """渲染侧边栏"""
     st.sidebar.markdown("## 🤖 机器人控制")
-    
+
     # 机器人状态
     if dashboard_manager.bot:
         status = "🟢 运行中" if dashboard_manager.bot.running else "🔴 已停止"
         st.sidebar.markdown(f"**状态:** <span class='status-running'>{status}</span>", unsafe_allow_html=True)
     else:
         st.sidebar.markdown("**状态:** <span class='status-initializing'>⚪ 未初始化</span>", unsafe_allow_html=True)
-    
+
     st.sidebar.divider()
-    
+
     # 控制按钮
     col1, col2 = st.sidebar.columns(2)
-    
+
     with col1:
         if st.button("🚀 启动", type="primary"):
             if not dashboard_manager.bot:
@@ -361,7 +361,7 @@ def render_sidebar(dashboard_manager):
                     st.sidebar.error("机器人启动失败!")
             else:
                 st.sidebar.success("机器人已在运行!")
-    
+
     with col2:
         if st.button("⏹️ 停止"):
             if dashboard_manager.bot:
@@ -370,22 +370,22 @@ def render_sidebar(dashboard_manager):
                 st.rerun()
             else:
                 st.sidebar.warning("机器人未运行!")
-    
+
     st.sidebar.divider()
-    
+
     # 快速配置
     st.sidebar.markdown("## ⚙️ 快速配置")
-    
+
     # 配置界面链接
     st.sidebar.markdown("### 🔧 配置界面")
-    
+
     # 使用 st.link_button 如果可用，否则使用普通链接
     try:
         st.sidebar.link_button("🔧 打开配置界面", "http://localhost:8502")
     except AttributeError:
         # 如果 st.link_button 不可用，使用普通链接
         st.sidebar.markdown("[🔧 点击打开配置界面](http://localhost:8502)")
-    
+
     # 显示配置界面状态
     if st.sidebar.button("📊 检查配置界面状态"):
         try:
@@ -397,27 +397,27 @@ def render_sidebar(dashboard_manager):
                 st.sidebar.warning("⚠️ 配置界面可能未启动")
         except:
             st.sidebar.error("❌ 配置界面未启动")
-    
+
     # 设置
     st.sidebar.markdown("## ⚙️ 设置")
-    
+
     refresh_interval = st.sidebar.slider("刷新间隔 (秒)", 10, 300, 30)
-    
+
     if st.sidebar.button("🔄 强制刷新"):
         st.rerun()
 
 def render_overview_metrics(dashboard_manager):
     """渲染概览指标"""
     st.subheader("📊 概览指标")
-    
+
     # 计算指标
     total_tokens = len(dashboard_manager.mock_data['tokens'])
     active_trades = len([t for t in dashboard_manager.mock_data['trades'] if t['success']])
     total_pnl = sum([p['pnl'] for p in dashboard_manager.mock_data['positions']])
     success_rate = (active_trades / len(dashboard_manager.mock_data['trades']) * 100) if dashboard_manager.mock_data['trades'] else 0
-    
+
     col1, col2, col3, col4 = st.columns(4)
-    
+
     with col1:
         st.markdown(f"""
         <div class="metric-card">
@@ -425,7 +425,7 @@ def render_overview_metrics(dashboard_manager):
             <p>发现代币</p>
         </div>
         """, unsafe_allow_html=True)
-    
+
     with col2:
         st.markdown(f"""
         <div class="metric-card">
@@ -433,7 +433,7 @@ def render_overview_metrics(dashboard_manager):
             <p>成功交易</p>
         </div>
         """, unsafe_allow_html=True)
-    
+
     with col3:
         st.markdown(f"""
         <div class="metric-card">
@@ -441,7 +441,7 @@ def render_overview_metrics(dashboard_manager):
             <p>成功率</p>
         </div>
         """, unsafe_allow_html=True)
-    
+
     with col4:
         st.markdown(f"""
         <div class="metric-card">
@@ -453,31 +453,31 @@ def render_overview_metrics(dashboard_manager):
 def render_token_discovery(dashboard_manager):
     """渲染代币发现"""
     st.subheader("🔍 代币发现")
-    
+
     tokens_df = pd.DataFrame(dashboard_manager.mock_data['tokens'])
-    
+
     # 代币表格
     st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-    
+
     # 筛选器
     col1, col2, col3 = st.columns(3)
-    
+
     with col1:
         status_filter = st.selectbox("状态筛选", ["全部", "approved", "trading", "pending"])
-    
+
     with col2:
         min_volume = st.number_input("最小交易量 ($)", min_value=0, value=1000000)
-    
+
     with col3:
         min_score = st.slider("最小评分", min_value=0, max_value=100, value=70)
-    
+
     # 应用筛选
     filtered_df = tokens_df.copy()
     if status_filter != "全部":
         filtered_df = filtered_df[filtered_df['status'] == status_filter]
     filtered_df = filtered_df[filtered_df['volume_24h'] >= min_volume]
     filtered_df = filtered_df[filtered_df['twitter_score'] >= min_score]
-    
+
     # 显示表格
     st.dataframe(
         filtered_df,
@@ -491,21 +491,21 @@ def render_token_discovery(dashboard_manager):
             "change_24h": st.column_config.NumberColumn("24h变化", format="%.2f%%"),
         }
     )
-    
+
     st.markdown('</div>', unsafe_allow_html=True)
 
 def render_trading_charts(dashboard_manager):
     """渲染交易图表"""
     st.subheader("📈 交易分析")
-    
+
     col1, col2 = st.columns(2)
-    
+
     with col1:
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        
+
         # 代币价格变化
         tokens_df = pd.DataFrame(dashboard_manager.mock_data['tokens'])
-        
+
         fig = px.bar(
             tokens_df,
             x='symbol',
@@ -520,12 +520,12 @@ def render_trading_charts(dashboard_manager):
             height=400
         )
         st.plotly_chart(fig, width='stretch')
-        
+
         st.markdown('</div>', unsafe_allow_html=True)
-    
+
     with col2:
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        
+
         # 交易量分布
         fig = px.pie(
             tokens_df,
@@ -535,18 +535,18 @@ def render_trading_charts(dashboard_manager):
         )
         fig.update_layout(height=400)
         st.plotly_chart(fig, width='stretch')
-        
+
         st.markdown('</div>', unsafe_allow_html=True)
 
 def render_positions(dashboard_manager):
     """渲染持仓信息"""
     st.subheader("💼 当前持仓")
-    
+
     positions_df = pd.DataFrame(dashboard_manager.mock_data['positions'])
-    
+
     if not positions_df.empty:
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        
+
         # 持仓表格
         st.dataframe(
             positions_df,
@@ -559,7 +559,7 @@ def render_positions(dashboard_manager):
                 "pnl_pct": st.column_config.NumberColumn("盈亏%", format="%.2f%%"),
             }
         )
-        
+
         # 盈亏图表
         fig = px.bar(
             positions_df,
@@ -575,7 +575,7 @@ def render_positions(dashboard_manager):
             height=300
         )
         st.plotly_chart(fig, width='stretch')
-        
+
         st.markdown('</div>', unsafe_allow_html=True)
     else:
         st.info("暂无持仓")
@@ -583,12 +583,12 @@ def render_positions(dashboard_manager):
 def render_trading_history(dashboard_manager):
     """渲染交易历史"""
     st.subheader("📊 交易历史")
-    
+
     trades_df = pd.DataFrame(dashboard_manager.mock_data['trades'])
     trades_df['timestamp'] = pd.to_datetime(trades_df['timestamp'])
-    
+
     st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-    
+
     # 交易历史表格
     st.dataframe(
         trades_df,
@@ -599,7 +599,7 @@ def render_trading_history(dashboard_manager):
             "pnl": st.column_config.NumberColumn("盈亏", format="$%.4f"),
         }
     )
-    
+
     # 交易趋势图
     fig = px.line(
         trades_df,
@@ -615,48 +615,48 @@ def render_trading_history(dashboard_manager):
         height=400
     )
     st.plotly_chart(fig, width='stretch')
-    
+
     st.markdown('</div>', unsafe_allow_html=True)
 
 def render_copy_trading_panel(dashboard_manager):
     """渲染跟单交易面板"""
     st.markdown('<div class="panel">', unsafe_allow_html=True)
     st.subheader("🤖 跟单交易监控")
-    
+
     # 检查跟单配置
     try:
         from dotenv import load_dotenv
         import os
         load_dotenv()
-        
+
         copy_enabled = os.getenv('COPY_TRADING_ENABLED', 'false').lower() == 'true'
         leader_wallet = os.getenv('LEADER_WALLET_ADDRESS', '')
         copy_ratio = float(os.getenv('COPY_RATIO', '1.0'))
         min_confidence = int(os.getenv('MIN_CONFIDENCE_SCORE', '70'))
-        
+
         if copy_enabled and leader_wallet:
             # 跟单状态
             col1, col2, col3, col4 = st.columns(4)
-            
+
             with col1:
                 st.metric("跟单状态", "🟢 已启用", "运行中")
-            
+
             with col2:
                 st.metric("跟单比例", f"{copy_ratio*100:.0f}%", "当前设置")
-            
+
             with col3:
                 st.metric("最小置信度", f"{min_confidence}%", "过滤阈值")
-            
+
             with col4:
                 st.metric("跟单钱包", "1个", "已配置")
-            
+
             # 跟单钱包信息
             st.markdown("### 📍 跟单钱包信息")
             st.code(f"主要钱包: {leader_wallet[:8]}...{leader_wallet[-8:]}")
-            
+
             # 模拟跟单交易记录
             st.markdown("### 📊 最近跟单交易")
-            
+
             copy_trades = [
                 {
                     'time': '2024-01-20 14:30:25',
@@ -683,7 +683,7 @@ def render_copy_trading_panel(dashboard_manager):
                     'status': '成功'
                 }
             ]
-            
+
             for trade in copy_trades:
                 col1, col2, col3, col4, col5, col6 = st.columns(6)
                 with col1:
@@ -700,30 +700,30 @@ def render_copy_trading_panel(dashboard_manager):
                 with col6:
                     status_color = "🟢" if trade['status'] == '成功' else "🔴"
                     st.text(f"{status_color} {trade['status']}")
-            
+
             # 跟单统计
             st.markdown("### 📈 跟单统计")
             col1, col2, col3 = st.columns(3)
-            
+
             with col1:
                 st.metric("今日跟单次数", "12", "3")
-            
+
             with col2:
                 st.metric("成功率", "91.7%", "2.3%")
-            
+
             with col3:
                 st.metric("总收益", "+2.4 SOL", "+15.2%")
-            
+
         else:
             st.warning("⚠️ 跟单功能未配置或未启用")
             st.info("请在配置界面中设置跟单参数")
-            
+
             if st.button("🔧 前往配置界面"):
                 st.markdown("[点击打开配置界面](http://localhost:8502)")
-    
+
     except Exception as e:
         st.error(f"❌ 跟单监控加载失败: {e}")
-    
+
     st.markdown('</div>', unsafe_allow_html=True)
 
 def main():
@@ -731,40 +731,40 @@ def main():
     # 初始化仪表板管理器
     if 'dashboard_manager' not in st.session_state:
         st.session_state.dashboard_manager = VisualDashboardManager()
-    
+
     dashboard_manager = st.session_state.dashboard_manager
-    
+
     # 渲染页面
     render_header()
     render_sidebar(dashboard_manager)
-    
+
     # 自动刷新
     if 'last_refresh' not in st.session_state:
         st.session_state.last_refresh = time.time()
-    
+
     refresh_interval = 30
     if time.time() - st.session_state.last_refresh > refresh_interval:
         st.session_state.last_refresh = time.time()
         st.rerun()
-    
+
     # 主要内容
     render_overview_metrics(dashboard_manager)
-    
+
     # 标签页
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["🔍 代币发现", "📈 交易分析", "💼 持仓管理", "🤖 跟单监控", "📊 交易历史"])
-    
+
     with tab1:
         render_token_discovery(dashboard_manager)
-    
+
     with tab2:
         render_trading_charts(dashboard_manager)
-    
+
     with tab3:
         render_positions(dashboard_manager)
-    
+
     with tab4:
         render_copy_trading_panel(dashboard_manager)
-    
+
     with tab5:
         render_trading_history(dashboard_manager)
 

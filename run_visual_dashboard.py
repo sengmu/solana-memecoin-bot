@@ -29,7 +29,7 @@ def main():
     print("⚙️  配置界面: http://localhost:8502")
     print("⏹️  按 Ctrl+C 停止所有服务")
     print("=" * 60)
-    
+
     try:
         # 启动主仪表板
         print("🔄 启动主仪表板...")
@@ -39,10 +39,10 @@ def main():
         )
         dashboard_thread.daemon = True
         dashboard_thread.start()
-        
+
         # 等待一下再启动配置界面
         time.sleep(3)
-        
+
         # 启动配置界面
         print("🔄 启动配置界面...")
         config_thread = threading.Thread(
@@ -51,15 +51,15 @@ def main():
         )
         config_thread.daemon = True
         config_thread.start()
-        
+
         # 等待用户中断
         print("\n✅ 所有服务已启动!")
         print("🌐 在浏览器中打开上述链接开始使用")
-        
+
         # 保持主线程运行
         while True:
             time.sleep(1)
-            
+
     except KeyboardInterrupt:
         print("\n⏹️  正在停止所有服务...")
         print("✅ 所有服务已停止")

@@ -13,7 +13,7 @@ def main():
     print("📊 配置界面将在 http://localhost:8502 打开")
     print("⏹️  按 Ctrl+C 停止配置界面")
     print("-" * 50)
-    
+
     try:
         # 启动配置界面
         subprocess.run([

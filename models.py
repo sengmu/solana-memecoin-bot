@@ -9,11 +9,9 @@ from enum import Enum
 import json
 import os
 
-
 class TradeType(Enum):
     BUY = "buy"
     SELL = "sell"
-
 
 class TokenStatus(Enum):
     PENDING = "pending"
@@ -22,7 +20,6 @@ class TokenStatus(Enum):
     REJECTED = "rejected"
     TRADING = "trading"
     SOLD = "sold"
-
 
 @dataclass
 class TokenInfo:
@@ -44,7 +41,7 @@ class TokenInfo:
     rugcheck_score: Optional[str] = None
     confidence_score: Optional[float] = None
     is_memecoin: bool = False
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         data = {
@@ -68,7 +65,6 @@ class TokenInfo:
         }
         return data
 
-
 @dataclass
 class Trade:
     """Represents a trade transaction."""
@@ -84,7 +80,7 @@ class Trade:
     success: bool = False
     error_message: Optional[str] = None
     gas_used: Optional[int] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
@@ -102,7 +98,6 @@ class Trade:
             'gas_used': self.gas_used
         }
 
-
 @dataclass
 class TwitterProfile:
     """Twitter profile information."""
@@ -116,7 +111,6 @@ class TwitterProfile:
     bio: str
     profile_score: float = 0.0
 
-
 @dataclass
 class TwitterTweet:
     """Individual tweet information."""
@@ -127,7 +121,6 @@ class TwitterTweet:
     like_count: int
     reply_count: int
     engagement_score: float = 0.0
-
 
 @dataclass
 class RugCheckResult:
@@ -144,7 +137,6 @@ class RugCheckResult:
     freeze_authority: bool
     overall_score: float = 0.0
 
-
 @dataclass
 class BotConfig:
     """Bot configuration settings."""
@@ -152,31 +144,31 @@ class BotConfig:
     solana_rpc_url: str = field(default_factory=lambda: os.getenv('RPC_URL', 'https://api.mainnet-beta.solana.com'))
     solana_ws_url: str = field(default_factory=lambda: os.getenv('WS_URL', 'wss://api.mainnet-beta.solana.com'))
     private_key: str = field(default_factory=lambda: os.getenv('WALLET_KEY_BASE58', ''))
-    
+
     # Trading Configuration
     max_position_size: float = field(default_factory=lambda: float(os.getenv('MAX_POSITION_SIZE', '1.0')))
     min_volume_24h: float = field(default_factory=lambda: float(os.getenv('MIN_VOLUME_24H', '1000000')))
     min_fdv: float = field(default_factory=lambda: float(os.getenv('MIN_FDV', '100000')))
     max_slippage: float = field(default_factory=lambda: float(os.getenv('MAX_SLIPPAGE', '1000')))
     default_slippage: float = field(default_factory=lambda: float(os.getenv('DEFAULT_SLIPPAGE', '500')))
-    
+
     # Twitter Configuration
     twitter_bearer_token: str = field(default_factory=lambda: os.getenv('TWITTER_BEARER_TOKEN', ''))
-    
+
     # Copy Trading
     leader_wallet_address: str = field(default_factory=lambda: os.getenv('LEADER_WALLET_ADDRESS', ''))
     copy_trading_enabled: bool = field(default_factory=lambda: os.getenv('COPY_TRADING_ENABLED', 'true').lower() == 'true')
     min_confidence_score: float = field(default_factory=lambda: float(os.getenv('MIN_CONFIDENCE_SCORE', '0.7')))
-    
+
     # Logging
     log_level: str = field(default_factory=lambda: os.getenv('LOG_LEVEL', 'INFO'))
     log_to_file: bool = field(default_factory=lambda: os.getenv('LOG_TO_FILE', 'false').lower() == 'true')
-    
+
     # Risk Management
     max_daily_loss: float = field(default_factory=lambda: float(os.getenv('MAX_DAILY_LOSS', '100.0')))
     stop_loss_percentage: float = field(default_factory=lambda: float(os.getenv('STOP_LOSS_PERCENTAGE', '20.0')))
     take_profit_percentage: float = field(default_factory=lambda: float(os.getenv('TAKE_PROFIT_PERCENTAGE', '100.0')))
-    
+
     # OpenSolBot 增强配置
     leader_wallets: List[str] = field(default_factory=list)
     copy_ratio: float = 1.0
@@ -188,24 +180,24 @@ class BotConfig:
     shyft_api_key: Optional[str] = None
     jupiter_api_key: Optional[str] = None
     raydium_api_key: Optional[str] = None
-    
+
     # Memecoin Keywords
     meme_keywords: List[str] = field(default_factory=lambda: [
         'meme', 'doge', 'shib', 'pepe', 'wojak', 'chad', 'based', 'gm', 'wagmi',
         'diamond', 'hands', 'moon', 'rocket', 'ape', 'monke', 'frog', 'cat',
         'dog', 'inu', 'inu', 'kishu', 'akita', 'floki', 'elon', 'musk'
     ])
-    
+
     @classmethod
     def from_env(cls) -> 'BotConfig':
         """Create config from environment variables using os.getenv."""
         import os
-        
+
         # Required environment variables
         private_key = os.getenv('PRIVATE_KEY')
         if not private_key:
             raise ValueError("PRIVATE_KEY environment variable is required")
-        
+
         return cls(
             solana_rpc_url=os.getenv('SOLANA_RPC_URL', 'https://api.mainnet-beta.solana.com'),
             solana_ws_url=os.getenv('SOLANA_WS_URL', 'wss://api.mainnet-beta.solana.com'),
@@ -226,7 +218,6 @@ class BotConfig:
             take_profit_percentage=float(os.getenv('TAKE_PROFIT_PERCENTAGE', '0.5'))
         )
 
-
 @dataclass
 class WalletToken:
     """Represents a token held in the wallet."""
@@ -238,7 +229,6 @@ class WalletToken:
     price: float
     last_updated: datetime
 
-
 @dataclass
 class PortfolioSnapshot:
     """Snapshot of the wallet portfolio at a point in time."""
@@ -248,7 +238,7 @@ class PortfolioSnapshot:
     tokens: Dict[str, WalletToken]
     new_tokens: List[str]  # New token addresses since last snapshot
     removed_tokens: List[str]  # Removed token addresses since last snapshot
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
@@ -268,7 +258,6 @@ class PortfolioSnapshot:
             'removed_tokens': self.removed_tokens
         }
 
-
 @dataclass
 class TradingStats:
     """Trading statistics tracking."""
@@ -280,12 +269,12 @@ class TradingStats:
     max_drawdown: float = 0.0
     win_rate: float = 0.0
     average_hold_time: float = 0.0
-    
+
     def update_win_rate(self):
         """Update win rate based on current stats."""
         if self.total_trades > 0:
             self.win_rate = (self.successful_trades / self.total_trades) * 100
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {

@@ -9,7 +9,7 @@ import re
 # 导入必要的模块
 try:
     from memecoin_bot import (
-        MemecoinBot, BotConfig, MemecoinData, 
+        MemecoinBot, BotConfig, MemecoinData,
         fetch_trending_pairs, extract_memecoins, filter_and_sort_memecoins,
         parse_number
     )
@@ -72,13 +72,13 @@ class MockBot:
         self.min_volume = 1000000
         self.min_fdv = 100000
         self.min_engagement = 10000
-    
+
     async def start_discovery(self):
         print("Mock discovery started")
-    
+
     async def stop_discovery(self):
         print("Mock discovery stopped")
-    
+
     async def fetch_trending_pairs(self):
         return [
             {"baseToken": {"name": "BONK", "symbol": "BONK", "address": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"}, "fdv": "1000000000", "volume": {"h24": "50000000"}, "priceChange": {"h24": "5.2"}, "pairAddress": "pair1", "priceUsd": "0.000001"},
@@ -109,14 +109,14 @@ st.markdown('<h1 class="main-header">🤖 Memecoin Trading Bot Dashboard</h1>', 
 # 侧边栏
 with st.sidebar:
     st.header("🎛️ 控制面板")
-    
+
     # 机器人状态
     bot = init_bot()
     st.session_state.bot = bot
-    
+
     if bot:
         st.success("✅ 机器人已初始化")
-        
+
         # 发现功能控制
         if hasattr(bot, 'start_discovery'):
             col1, col2 = st.columns(2)
@@ -128,7 +128,7 @@ with st.sidebar:
                 if st.button("⏹️ 停止发现"):
                     asyncio.create_task(bot.stop_discovery())
                     st.success("发现功能已停止")
-        
+
         # 显示机器人信息
         st.subheader("📊 机器人状态")
         st.metric("持仓数量", len(bot.positions) if hasattr(bot, 'positions') else 0)
@@ -142,13 +142,13 @@ tab1, tab2, tab3, tab4 = st.tabs(["🔍 代币发现", "📈 持仓监控", "�
 
 with tab1:
     st.header("🔍 代币发现")
-    
+
     # 刷新按钮
     if st.button("🔄 刷新发现", type="primary"):
         try:
             # 获取机器人实例
             bot = st.session_state.bot or create_mock_bot()
-            
+
             # 获取数据
             if hasattr(bot, 'fetch_trending_pairs'):
                 pairs = asyncio.run(bot.fetch_trending_pairs())
@@ -159,24 +159,24 @@ with tab1:
                     {"baseToken": {"name": "PEPE", "symbol": "PEPE", "address": "pepe1234567890"}, "fdv": "500000000", "volume": {"h24": "20000000"}, "priceChange": {"h24": "15"}, "pairAddress": "pair2", "priceUsd": "0.0000001"},
                     {"baseToken": {"name": "DOGE", "symbol": "DOGE", "address": "doge1234567890"}, "fdv": "2000000000", "volume": {"h24": "100000000"}, "priceChange": {"h24": "8.5"}, "pairAddress": "pair3", "priceUsd": "0.0000005"}
                 ]
-            
+
             if not pairs:
                 st.warning("API返回空数据，使用示例数据")
                 pairs = [
                     {"baseToken": {"name": "BONK", "symbol": "BONK", "address": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"}, "fdv": "1000000000", "volume": {"h24": "50000000"}, "priceChange": {"h24": "5.2"}, "pairAddress": "pair1", "priceUsd": "0.000001"},
                     {"baseToken": {"name": "PEPE", "symbol": "PEPE", "address": "pepe1234567890"}, "fdv": "500000000", "volume": {"h24": "20000000"}, "priceChange": {"h24": "15"}, "pairAddress": "pair2", "priceUsd": "0.0000001"}
                 ]
-            
+
             # 处理数据
             try:
                 memecoins = extract_memecoins(pairs)
                 filtered_memecoins = filter_and_sort_memecoins(
-                    memecoins, 
+                    memecoins,
                     getattr(bot, 'min_volume', 1000000),
                     getattr(bot, 'min_fdv', 100000),
                     getattr(bot, 'min_engagement', 10000)
                 )
-                
+
                 if filtered_memecoins:
                     # 创建DataFrame
                     df_data = []
@@ -190,20 +190,20 @@ with tab1:
                             "Price Change (%)": f"{m.price_change_24h:+.2f}%",
                             "Twitter": m.twitter_handle or "N/A"
                         })
-                    
+
                     df = pd.DataFrame(df_data)
-                    
+
                     # 显示数据
                     st.dataframe(df, width='stretch')
                     st.success(f"✅ 发现 {len(filtered_memecoins)} 个符合条件的代币")
                 else:
                     st.warning("⚠️ 没有找到符合条件的代币")
-                    
+
             except Exception as e:
                 st.error(f"数据处理错误: {e}")
                 # 显示原始数据作为备用
                 st.json(pairs[:3])
-                
+
         except Exception as e:
             st.error(f"刷新失败: {e}")
             # 显示模拟数据
@@ -217,7 +217,7 @@ with tab1:
 
 with tab2:
     st.header("📈 持仓监控")
-    
+
     # 显示持仓信息
     bot = st.session_state.bot
     if bot and hasattr(bot, 'positions'):
@@ -232,21 +232,21 @@ with tab2:
 
 with tab3:
     st.header("👥 跟单功能")
-    
+
     # 跟单配置
     col1, col2 = st.columns(2)
-    
+
     with col1:
         st.subheader("📊 跟单统计")
         st.metric("跟单状态", "启用" if getattr(bot, 'enable_copy', False) else "禁用")
         st.metric("买入金额", f"{getattr(bot, 'buy_size_sol', 0)} SOL")
         st.metric("跟单交易员", getattr(bot, 'copy_trader', "未设置"))
-    
+
     with col2:
         st.subheader("⚙️ 跟单设置")
         enable_copy = st.checkbox("启用跟单", value=getattr(bot, 'enable_copy', False))
         buy_size = st.number_input("买入金额 (SOL)", min_value=0.01, max_value=10.0, value=getattr(bot, 'buy_size_sol', 0.5), step=0.01)
-        
+
         if st.button("保存设置"):
             if bot:
                 bot.enable_copy = enable_copy
@@ -255,7 +255,7 @@ with tab3:
 
 with tab4:
     st.header("⚙️ 设置")
-    
+
     # 显示当前配置
     st.subheader("当前配置")
     if bot:
@@ -266,16 +266,16 @@ with tab4:
             "买入金额": f"{getattr(bot, 'buy_size_sol', 0.5)} SOL",
             "跟单状态": "启用" if getattr(bot, 'enable_copy', False) else "禁用"
         }
-        
+
         for key, value in config_info.items():
             st.write(f"**{key}**: {value}")
-    
+
     # 配置修改
     st.subheader("修改配置")
     if st.button("重置为默认值"):
         st.info("配置已重置为默认值")
         st.rerun()
-    
+
 # 页脚
 st.markdown("---")
 st.markdown("🤖 Memecoin Trading Bot Dashboard - 智能代币交易机器人")

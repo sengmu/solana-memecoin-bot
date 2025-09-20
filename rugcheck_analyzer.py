@@ -50,56 +50,55 @@ except ImportError:
 
 from models import TokenInfo, RugCheckResult, BotConfig
 
-
 class RugCheckAnalyzer:
     """Analyzes token safety using RugCheck website."""
-    
+
     def __init__(self, config: BotConfig):
         self.config = config
         self.logger = logging.getLogger(__name__)
         self.driver: Optional[webdriver.Chrome] = None
         self.selenium_available = SELENIUM_AVAILABLE
-        
+
         if not self.selenium_available:
             self.logger.warning("Selenium not available, using mock RugCheck analysis")
-        
+
     async def analyze_token(self, token: TokenInfo) -> Optional[RugCheckResult]:
         """Analyze token safety using RugCheck."""
         if not self.selenium_available:
             # 返回模拟的 RugCheck 结果
             return self._generate_mock_rugcheck_result(token)
-        
+
         try:
             await self._setup_driver()
-            
+
             # Navigate to RugCheck
             rugcheck_url = f"https://rugcheck.xyz/tokens/{token.address}"
             self.logger.info(f"Analyzing {token.symbol} on RugCheck: {rugcheck_url}")
-            
+
             self.driver.get(rugcheck_url)
-            
+
             # Wait for page to load
             await asyncio.sleep(3)
-            
+
             # Extract safety information
             result = await self._extract_safety_data(token.address)
-            
+
             return result
-            
+
         except Exception as e:
             self.logger.error(f"Error analyzing token {token.symbol} on RugCheck: {e}")
             return self._generate_mock_rugcheck_result(token)
         finally:
             await self._cleanup_driver()
-    
+
     def _generate_mock_rugcheck_result(self, token: TokenInfo) -> RugCheckResult:
         """Generate mock RugCheck result when selenium is not available."""
         import random
-        
+
         # 生成模拟的安全评分
         safety_score = random.uniform(60, 95)
         is_safe = safety_score > 70
-        
+
         return RugCheckResult(
             token_address=token.address,
             safety_score=safety_score,
@@ -118,7 +117,7 @@ class RugCheckAnalyzer:
             rugcheck_url=f"https://rugcheck.xyz/tokens/{token.address}",
             notes="Mock analysis due to selenium unavailability"
         )
-            
+
     async def _setup_driver(self):
         """Setup Chrome driver with appropriate options."""
         try:
@@ -129,21 +128,21 @@ class RugCheckAnalyzer:
             chrome_options.add_argument('--disable-gpu')
             chrome_options.add_argument('--window-size=1920,1080')
             chrome_options.add_argument('--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
-            
+
             # Disable images and CSS for faster loading
             prefs = {
                 "profile.managed_default_content_settings.images": 2,
                 "profile.default_content_setting_values.stylesheets": 2
             }
             chrome_options.add_experimental_option("prefs", prefs)
-            
+
             self.driver = webdriver.Chrome(options=chrome_options)
             self.driver.set_page_load_timeout(30)
-            
+
         except Exception as e:
             self.logger.error(f"Error setting up Chrome driver: {e}")
             raise
-            
+
     async def _cleanup_driver(self):
         """Clean up the Chrome driver."""
         if self.driver:
@@ -153,12 +152,12 @@ class RugCheckAnalyzer:
                 self.logger.error(f"Error cleaning up driver: {e}")
             finally:
                 self.driver = None
-                
+
     async def _extract_safety_data(self, token_address: str) -> RugCheckResult:
         """Extract safety data from RugCheck page."""
         try:
             wait = WebDriverWait(self.driver, 10)
-            
+
             # Initialize result with defaults
             result = RugCheckResult(
                 token_address=token_address,
@@ -173,21 +172,21 @@ class RugCheckAnalyzer:
                 freeze_authority=True,
                 overall_score=0.0
             )
-            
+
             # Wait for main content to load
             try:
                 wait.until(EC.presence_of_element_located((By.CLASS_NAME, "token-info")))
             except TimeoutException:
                 self.logger.warning("Timeout waiting for token info to load")
                 return result
-                
+
             # Extract overall rating
             try:
                 rating_element = self.driver.find_element(By.CSS_SELECTOR, ".rating-badge, .score-badge, [class*='rating']")
                 result.rating = rating_element.text.strip()
             except NoSuchElementException:
                 self.logger.warning("Could not find rating element")
-                
+
             # Extract liquidity information
             try:
                 liquidity_elements = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'Liquidity') or contains(text(), 'liquidity')]")
@@ -198,7 +197,7 @@ class RugCheckAnalyzer:
                         break
             except NoSuchElementException:
                 pass
-                
+
             # Extract ownership information
             try:
                 ownership_elements = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'Ownership') or contains(text(), 'Renounced')]")
@@ -208,7 +207,7 @@ class RugCheckAnalyzer:
                         break
             except NoSuchElementException:
                 pass
-                
+
             # Extract whale percentage
             try:
                 whale_elements = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'Whale') or contains(text(), 'whale') or contains(text(), '%')]")
@@ -224,7 +223,7 @@ class RugCheckAnalyzer:
                                 result.whale_percentage = max_percentage
             except (NoSuchElementException, ValueError):
                 pass
-                
+
             # Extract contract verification status
             try:
                 verified_elements = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'Verified') or contains(text(), 'Contract')]")
@@ -234,7 +233,7 @@ class RugCheckAnalyzer:
                         break
             except NoSuchElementException:
                 pass
-                
+
             # Extract honeypot status
             try:
                 honeypot_elements = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'Honeypot') or contains(text(), 'honeypot')]")
@@ -244,7 +243,7 @@ class RugCheckAnalyzer:
                         break
             except NoSuchElementException:
                 pass
-                
+
             # Extract mint authority status
             try:
                 mint_elements = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'Mint') or contains(text(), 'mint')]")
@@ -254,7 +253,7 @@ class RugCheckAnalyzer:
                         break
             except NoSuchElementException:
                 pass
-                
+
             # Extract freeze authority status
             try:
                 freeze_elements = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'Freeze') or contains(text(), 'freeze')]")
@@ -264,12 +263,12 @@ class RugCheckAnalyzer:
                         break
             except NoSuchElementException:
                 pass
-                
+
             # Calculate overall score
             result.overall_score = self._calculate_safety_score(result)
-            
+
             return result
-            
+
         except Exception as e:
             self.logger.error(f"Error extracting safety data: {e}")
             return RugCheckResult(
@@ -285,11 +284,11 @@ class RugCheckAnalyzer:
                 freeze_authority=True,
                 overall_score=0.0
             )
-            
+
     def _calculate_safety_score(self, result: RugCheckResult) -> float:
         """Calculate overall safety score based on various factors."""
         score = 0.0
-        
+
         # Rating score (0-30 points)
         rating_scores = {
             "Good": 30,
@@ -301,7 +300,7 @@ class RugCheckAnalyzer:
             "Dangerous": 0,
             "Rug": 0
         }
-        
+
         rating_lower = result.rating.lower()
         for rating, points in rating_scores.items():
             if rating.lower() in rating_lower:
@@ -310,15 +309,15 @@ class RugCheckAnalyzer:
         else:
             # Default score for unknown ratings
             score += 10
-            
+
         # Liquidity locked (0-20 points)
         if result.liquidity_locked:
             score += 20
-            
+
         # Ownership renounced (0-20 points)
         if result.ownership_renounced:
             score += 20
-            
+
         # Whale percentage (0-15 points)
         if result.whale_percentage <= 5:
             score += 15
@@ -326,65 +325,65 @@ class RugCheckAnalyzer:
             score += 10
         elif result.whale_percentage <= 20:
             score += 5
-            
+
         # Contract verified (0-10 points)
         if result.contract_verified:
             score += 10
-            
+
         # Honeypot check (0-10 points)
         if not result.honeypot:
             score += 10
-            
+
         # Mint authority (0-10 points)
         if not result.mint_authority:
             score += 10
-            
+
         # Freeze authority (0-10 points)
         if not result.freeze_authority:
             score += 10
-            
+
         return min(score, 100.0)
-        
+
     def is_safe_token(self, result: RugCheckResult) -> bool:
         """Determine if a token is safe based on RugCheck analysis."""
         try:
             # Must have "Good" or better rating
             if result.rating.lower() not in ["good", "excellent", "safe"]:
                 return False
-                
+
             # Must not be a honeypot
             if result.honeypot:
                 return False
-                
+
             # Whale percentage should be reasonable
             if result.whale_percentage > 10:
                 return False
-                
+
             # Overall score should be above 70
             if result.overall_score < 70:
                 return False
-                
+
             return True
-            
+
         except Exception as e:
             self.logger.error(f"Error determining token safety: {e}")
             return False
-            
+
     async def batch_analyze(self, tokens: list[TokenInfo]) -> Dict[str, RugCheckResult]:
         """Analyze multiple tokens in batch."""
         results = {}
-        
+
         for token in tokens:
             try:
                 result = await self.analyze_token(token)
                 if result:
                     results[token.address] = result
-                    
+
                 # Add delay between requests to avoid rate limiting
                 await asyncio.sleep(2)
-                
+
             except Exception as e:
                 self.logger.error(f"Error in batch analysis for {token.symbol}: {e}")
                 continue
-                
+
         return results

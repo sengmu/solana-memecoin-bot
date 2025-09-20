@@ -13,7 +13,7 @@ def main():
     print("📊 Dashboard will be available at: http://localhost:8501")
     print("⏹️  Press Ctrl+C to stop the dashboard")
     print("-" * 50)
-    
+
     try:
         # Run streamlit dashboard
         subprocess.run([

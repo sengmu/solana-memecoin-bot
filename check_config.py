@@ -10,16 +10,16 @@ from dotenv import load_dotenv
 def check_environment():
     """检查环境变量配置"""
     print("🔍 检查环境配置...")
-    
+
     # 加载环境变量
     load_dotenv()
-    
+
     # 必需的环境变量
     required_vars = {
         'PRIVATE_KEY': 'Solana 钱包私钥',
         'SOLANA_RPC_URL': 'Solana RPC 节点地址',
     }
-    
+
     # 可选的环境变量
     optional_vars = {
         'TWITTER_BEARER_TOKEN': 'Twitter API Bearer Token',
@@ -27,7 +27,7 @@ def check_environment():
         'MIN_VOLUME_24H': '最小24小时交易量',
         'MIN_FDV': '最小完全稀释估值',
     }
-    
+
     print("\n📋 必需配置:")
     all_required_ok = True
     for var, description in required_vars.items():
@@ -37,7 +37,7 @@ def check_environment():
         else:
             print(f"  ❌ {var}: 未配置 ({description})")
             all_required_ok = False
-    
+
     print("\n📋 可选配置:")
     for var, description in optional_vars.items():
         value = os.getenv(var)
@@ -45,32 +45,32 @@ def check_environment():
             print(f"  ✅ {var}: 已配置 ({description})")
         else:
             print(f"  ⚠️  {var}: 未配置 ({description})")
-    
+
     return all_required_ok
 
 def check_wallet_connection():
     """检查钱包连接"""
     print("\n🔑 检查钱包连接...")
-    
+
     try:
         from solana.rpc.api import Client
         from solders.keypair import Keypair
         import base58
-        
+
         private_key = os.getenv('PRIVATE_KEY')
         if not private_key or private_key == 'your_wallet_private_key_here':
             print("  ❌ 私钥未配置")
             return False
-        
+
         try:
             # 验证私钥格式
             keypair = Keypair.from_base58_string(private_key)
             print(f"  ✅ 钱包地址: {keypair.pubkey()}")
-            
+
             # 测试 RPC 连接
             rpc_url = os.getenv('SOLANA_RPC_URL', 'https://api.mainnet-beta.solana.com')
             client = Client(rpc_url)
-            
+
             # 获取账户信息
             account_info = client.get_account_info(keypair.pubkey())
             if account_info.value:
@@ -78,13 +78,13 @@ def check_wallet_connection():
                 print(f"  ✅ 账户余额: {balance.value / 1e9:.4f} SOL")
             else:
                 print("  ⚠️  账户不存在或余额为0")
-            
+
             return True
-            
+
         except Exception as e:
             print(f"  ❌ 钱包连接失败: {e}")
             return False
-            
+
     except ImportError as e:
         print(f"  ❌ 缺少依赖: {e}")
         print("  请运行: pip install -r requirements.txt")
@@ -93,7 +93,7 @@ def check_wallet_connection():
 def check_trading_config():
     """检查交易配置"""
     print("\n💰 检查交易配置...")
-    
+
     config_vars = {
         'MAX_POSITION_SIZE': '最大单笔交易金额 (SOL)',
         'MIN_VOLUME_24H': '最小24小时交易量 (USD)',
@@ -101,7 +101,7 @@ def check_trading_config():
         'MAX_SLIPPAGE': '最大滑点 (%)',
         'DEFAULT_SLIPPAGE': '默认滑点 (%)',
     }
-    
+
     for var, description in config_vars.items():
         value = os.getenv(var)
         if value:
@@ -117,16 +117,16 @@ def main():
     """主函数"""
     print("🤖 Solana Memecoin 交易机器人配置检查")
     print("=" * 50)
-    
+
     # 检查环境变量
     env_ok = check_environment()
-    
+
     # 检查钱包连接
     wallet_ok = check_wallet_connection()
-    
+
     # 检查交易配置
     check_trading_config()
-    
+
     print("\n" + "=" * 50)
     if env_ok and wallet_ok:
         print("🎉 配置检查通过！可以开始交易了。")
@@ -142,7 +142,7 @@ def main():
         if not wallet_ok:
             print("  - 检查私钥和 RPC 连接")
         print("\n📖 详细说明请查看: TRADING_SETUP.md")
-    
+
     return env_ok and wallet_ok
 
 if __name__ == "__main__":

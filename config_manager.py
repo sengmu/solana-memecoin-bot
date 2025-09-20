@@ -14,12 +14,12 @@ logger = logging.getLogger(__name__)
 
 class ConfigManager:
     """配置管理器"""
-    
+
     def __init__(self, config_path: str = "config.toml"):
         self.config_path = Path(config_path)
         self.config = {}
         self.load_config()
-    
+
     def load_config(self) -> None:
         """加载配置文件"""
         try:
@@ -33,7 +33,7 @@ class ConfigManager:
         except Exception as e:
             logger.error(f"配置文件加载失败: {e}")
             self._create_default_config()
-    
+
     def _create_default_config(self) -> None:
         """创建默认配置"""
         self.config = {
@@ -78,31 +78,31 @@ class ConfigManager:
                 'chat_id': 'your_telegram_chat_id_here'
             }
         }
-    
+
     def get(self, key: str, default: Any = None) -> Any:
         """获取配置值"""
         keys = key.split('.')
         value = self.config
-        
+
         try:
             for k in keys:
                 value = value[k]
             return value
         except (KeyError, TypeError):
             return default
-    
+
     def set(self, key: str, value: Any) -> None:
         """设置配置值"""
         keys = key.split('.')
         config = self.config
-        
+
         for k in keys[:-1]:
             if k not in config:
                 config[k] = {}
             config = config[k]
-        
+
         config[keys[-1]] = value
-    
+
     def save_config(self) -> bool:
         """保存配置到文件"""
         try:
@@ -113,14 +113,14 @@ class ConfigManager:
         except Exception as e:
             logger.error(f"配置保存失败: {e}")
             return False
-    
+
     def get_wallet_config(self) -> Dict[str, Any]:
         """获取钱包配置"""
         return {
             'private_key': self.get('wallet.private_key'),
             'wallet_address': self.get('wallet.wallet_address')
         }
-    
+
     def get_rpc_config(self) -> Dict[str, Any]:
         """获取 RPC 配置"""
         return {
@@ -129,7 +129,7 @@ class ConfigManager:
             'timeout': self.get('rpc.timeout', 30),
             'retry_count': self.get('rpc.retry_count', 3)
         }
-    
+
     def get_trading_config(self) -> Dict[str, Any]:
         """获取交易配置"""
         return {
@@ -142,7 +142,7 @@ class ConfigManager:
             'stop_loss_percentage': self.get('trading.stop_loss_percentage', 0.2),
             'take_profit_percentage': self.get('trading.take_profit_percentage', 0.5)
         }
-    
+
     def get_copy_trading_config(self) -> Dict[str, Any]:
         """获取跟单交易配置"""
         return {
@@ -152,7 +152,7 @@ class ConfigManager:
             'min_confidence_score': self.get('copy_trading.min_confidence_score', 70),
             'max_copy_amount': self.get('copy_trading.max_copy_amount', 1.0)
         }
-    
+
     def get_telegram_config(self) -> Dict[str, Any]:
         """获取 Telegram 配置"""
         return {
@@ -161,7 +161,7 @@ class ConfigManager:
             'chat_id': self.get('telegram.chat_id'),
             'admin_chat_id': self.get('telegram.admin_chat_id')
         }
-    
+
     def get_geyser_config(self) -> Dict[str, Any]:
         """获取 Geyser 配置"""
         return {
@@ -170,7 +170,7 @@ class ConfigManager:
             'token': self.get('geyser.token'),
             'programs': self.get('geyser.programs', [])
         }
-    
+
     def get_api_config(self) -> Dict[str, Any]:
         """获取 API 配置"""
         return {
@@ -181,34 +181,34 @@ class ConfigManager:
             'jupiter_api_key': self.get('api.jupiter_api_key'),
             'raydium_api_key': self.get('api.raydium_api_key')
         }
-    
+
     def validate_config(self) -> tuple[List[str], List[str]]:
         """验证配置"""
         errors = []
         warnings = []
-        
+
         # 检查必需配置
         required_configs = [
             ('wallet.private_key', '钱包私钥'),
             ('rpc.endpoints', 'RPC 节点'),
         ]
-        
+
         for key, name in required_configs:
             if not self.get(key) or self.get(key) == f'your_{key.split(".")[-1]}_here':
                 errors.append(f"{name}未配置")
-        
+
         # 检查跟单配置
         if self.get('copy_trading.enabled'):
             if not self.get('copy_trading.leader_wallets'):
                 warnings.append("跟单功能已启用但未配置跟单钱包")
-        
+
         # 检查 Telegram 配置
         if self.get('telegram.enabled'):
             if not self.get('telegram.bot_token') or not self.get('telegram.chat_id'):
                 warnings.append("Telegram 功能已启用但配置不完整")
-        
+
         return errors, warnings
-    
+
     def update_from_env(self) -> None:
         """从环境变量更新配置"""
         env_mapping = {
@@ -231,7 +231,7 @@ class ConfigManager:
             'MAX_SLIPPAGE': 'trading.max_slippage',
             'DEFAULT_SLIPPAGE': 'trading.default_slippage'
         }
-        
+
         for env_key, config_key in env_mapping.items():
             env_value = os.getenv(env_key)
             if env_value:

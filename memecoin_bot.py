@@ -37,25 +37,25 @@ except ImportError:
         def get(self, url): pass
         def quit(self): pass
         def find_element(self, *args, **kwargs): return MockElement()
-    
+
     class MockElement:
         def __init__(self): pass
         def text(self): return ""
         def get_attribute(self, attr): return ""
-    
+
     class MockOptions:
         def __init__(self): pass
         def add_argument(self, arg): pass
         def add_experimental_option(self, name, value): pass
-    
+
     class MockWebDriverWait:
         def __init__(self, driver, timeout): pass
         def until(self, condition): return MockElement()
-    
+
     class MockEC:
         @staticmethod
         def presence_of_element_located(locator): return lambda x: MockElement()
-    
+
     webdriver = type('MockWebDriver', (), {'Chrome': MockWebDriver})()
     By = type('MockBy', (), {'ID': 'id', 'CLASS_NAME': 'class_name', 'TAG_NAME': 'tag_name'})()
     Options = MockOptions
@@ -187,7 +187,7 @@ def parse_number(text: str) -> float:
             return float(text)
         except ValueError:
             return 0.0
-            
+
 def parse_number_twitter(text: str) -> int:
     """Parse abbreviated numbers for Twitter followers."""
     return int(parse_number(text))
@@ -209,7 +209,7 @@ async def fetch_trending_pairs(max_pairs: int = 200, timeout: int = 10) -> List[
         "Origin": "https://dexscreener.com"
     }
     all_pairs = []
-    
+
     # REST API for trending Solana pairs
     rest_url = "https://api.dexscreener.com/latest/dex/pairs/solana?rankBy=trendingScore&order=desc&limit=200"
     try:
@@ -222,7 +222,7 @@ async def fetch_trending_pairs(max_pairs: int = 200, timeout: int = 10) -> List[
                 return all_pairs
     except Exception as e:
         logger.warning(f"REST API fetch failed: {e}")
-    
+
     # Fallback sample data
     logger.warning("Using fallback sample data.")
     sample_pairs = [
@@ -264,7 +264,7 @@ def extract_memecoins(pairs: List[Dict[str, Any]]) -> List[MemecoinData]:
         ))
     return memecoins
 
-def filter_and_sort_memecoins(memecoins: List[MemecoinData], min_volume: float = 1000000, 
+def filter_and_sort_memecoins(memecoins: List[MemecoinData], min_volume: float = 1000000,
                               min_fdv: float = 100000, min_engagement: int = 10000) -> List[MemecoinData]:
     filtered = []
     for m in memecoins:
@@ -278,15 +278,15 @@ def filter_and_sort_memecoins(memecoins: List[MemecoinData], min_volume: float =
             logger.warning(f"Skipping {m.name}: invalid data")
             continue
     def score(m: MemecoinData) -> float:
-        return (parse_number(str(m.volume_24h)) / 1000000 + 
-                parse_number(str(m.fdv)) / 10000000 + 
+        return (parse_number(str(m.volume_24h)) / 1000000 +
+                parse_number(str(m.fdv)) / 10000000 +
                 parse_number(str(m.social_engagement)) / 10000)
     return sorted(filtered, key=score, reverse=True)
 
 class PriorityFeeOptimizer:
     def __init__(self, client: AsyncClient):
         self.client = client
-    
+
     async def get_optimized_fee(self, multiplier: float = 1.5) -> int:
         try:
             response = requests.post(
@@ -320,7 +320,7 @@ class BuySellModule:
         self.client = AsyncClient(config.rpc_endpoint)
         self.priority_optimizer = PriorityFeeOptimizer(self.client)
         self.slippage_optimizer = SlippageOptimizer()
-    
+
     async def optimize_params(self, token_data: Dict[str, Any]) -> Dict[str, Any]:
         pri_fee = await self.priority_optimizer.get_optimized_fee()
         slippage = self.slippage_optimizer.get_optimized_slippage(
@@ -329,7 +329,7 @@ class BuySellModule:
         fdv = token_data.get('fdv', 1000000)
         buy_size = max(0.1, min(self.config.buy_size_sol, 10000000 / fdv * 0.1))
         return {'priority_fee': pri_fee, 'slippage_bps': slippage, 'buy_size_sol': buy_size}
-    
+
     async def get_quote(self, input_mint: str, output_mint: str, amount: int, slippage_bps: int) -> Optional[Dict]:
         params = {'inputMint': input_mint, 'outputMint': output_mint, 'amount': amount, 'slippageBps': slippage_bps}
         try:
@@ -337,7 +337,7 @@ class BuySellModule:
             return response.json() if response.status_code == 200 else None
         except:
             return None
-    
+
     async def execute_swap(self, quote_response: Dict, priority_fee: int) -> Optional[Signature]:
         swap_request = {'quoteResponse': quote_response, 'userPublicKey': str(self.config.wallet_keypair.pubkey()), 'wrapAndUnwrapSol': True, 'computeUnitPriceMicroLamports': priority_fee}
         try:
@@ -356,7 +356,7 @@ class BuySellModule:
         except Exception as e:
             logger.error(f"Swap execution error: {e}")
             return None
-    
+
     async def buy_token(self, mint_address: str, token_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         optimized = await self.optimize_params(token_data)
         amount_lamports = int(optimized['buy_size_sol'] * 1000000000)
@@ -365,7 +365,7 @@ class BuySellModule:
             return None
         sig = await self.execute_swap(quote, optimized['priority_fee'])
         return {'action': 'buy', 'mint': mint_address, 'amount_sol': optimized['buy_size_sol'], 'slippage_bps': optimized['slippage_bps'], 'priority_fee': optimized['priority_fee'], 'signature': str(sig) if sig else None}
-    
+
     async def sell_token(self, mint_address: str, percentage: float = 100.0, token_data: Dict[str, Any] = None) -> Optional[Dict[str, Any]]:
         if not token_data:
             token_data = {}
@@ -383,22 +383,22 @@ class CopyTradeModule(BuySellModule):
         super().__init__(config)
         self.processed_signatures = set()
         self.held_positions: Dict[str, Dict[str, Any]] = {}
-    
+
     async def rpc_request(self, method: str, params: List[Any]) -> Dict[str, Any]:
         data = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
         response = requests.post(self.config.rpc_endpoint, json=data)
         return response.json() if response.status_code == 200 else {}
-    
+
     async def get_recent_signatures(self, address: str, limit: int = 5) -> List[Dict[str, Any]]:
         params = [address, {"limit": limit}]
         resp = await self.rpc_request("getSignaturesForAddress", params)
         return resp.get('result', [])
-    
+
     async def get_transaction(self, signature: str) -> Dict[str, Any]:
         params = [signature, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}]
         resp = await self.rpc_request("getTransaction", params)
         return resp.get('result', {})
-    
+
     def parse_token_transfers(self, transaction: Dict[str, Any]) -> List[Dict[str, Any]]:
         transfers = []
         if not transaction or 'transaction' not in transaction:
@@ -412,7 +412,7 @@ class CopyTradeModule(BuySellModule):
                     is_buy = 'destination' in info and info['destination'] == self.config.leader_wallet
                     transfers.append({'mint': info['mint'], 'amount': int(info.get('amount', 0)), 'is_buy': is_buy})
         return transfers
-    
+
     async def get_token_price(self, mint: str) -> Optional[float]:
         url = f"https://api.dexscreener.com/latest/dex/tokens/{mint}"
         try:
@@ -423,7 +423,7 @@ class CopyTradeModule(BuySellModule):
         except:
             pass
         return None
-    
+
     async def copy_buy(self, mint: str, amount: int, token_data: Dict[str, Any] = None) -> Optional[Dict[str, Any]]:
         optimized = await self.optimize_params(token_data)
         amount_lamports = int(optimized['buy_size_sol'] * 1000000000)
@@ -434,7 +434,7 @@ class CopyTradeModule(BuySellModule):
         entry_price = await self.get_token_price(mint)
         self.held_positions[mint] = {'entry_price': entry_price, 'amount': amount_lamports}
         return {'action': 'copy_buy', 'mint': mint, 'amount_sol': optimized['buy_size_sol'], 'entry_price': entry_price, 'signature': str(sig) if sig else None}
-    
+
     async def copy_sell(self, mint: str, percentage: float = 100.0) -> Optional[Dict[str, Any]]:
         if mint not in self.held_positions:
             return None
@@ -448,7 +448,7 @@ class CopyTradeModule(BuySellModule):
         if percentage >= 100:
             del self.held_positions[mint]
         return {'action': 'copy_sell', 'mint': mint, 'percentage': percentage, 'signature': str(sig) if sig else None}
-    
+
     async def monitor_and_copy(self):
         logger.info(f"Starting copy trading: Monitoring leader {self.config.leader_wallet}")
         while True:
@@ -489,7 +489,7 @@ class CopyTradeModule(BuySellModule):
             except Exception as e:
                 logger.error(f"Copy trade error: {e}")
                 await asyncio.sleep(10)
-    
+
     def log_trade(self, trade: Dict[str, Any]):
         trade['timestamp'] = datetime.now().isoformat()
         with open('trades.json', 'a') as f:
@@ -597,12 +597,12 @@ class RugCheckAnalyzer:
         else:
             self.driver = None
             self.wait = None
-    
+
     def check_token(self, contract_address: str) -> RugCheckResult:
         if not self.selenium_available:
             # 返回模拟结果
             return self._generate_mock_rugcheck_result(contract_address)
-        
+
         url = f"{RUGCHECK_BASE_URL}{contract_address}"
         self.driver.get(url)
         try:
@@ -655,7 +655,7 @@ class RugCheckAnalyzer:
         except Exception as e:
             logger.error(f"RugCheck error: {e}")
             return RugCheckResult(rating='Error', warnings=[str(e)], top_holders=[], has_large_whale=False, liquidity=None, market_cap=None, other_metrics={})
-    
+
     def _generate_mock_rugcheck_result(self, contract_address: str) -> RugCheckResult:
         """生成模拟的rugcheck结果"""
         return RugCheckResult(
@@ -675,7 +675,7 @@ class RugCheckAnalyzer:
                 "verified": True
             }
         )
-    
+
     def close(self):
         if self.driver:
             self.driver.quit()
@@ -686,22 +686,22 @@ class WalletMonitor:
         self.rpc_endpoint = rpc_endpoint
         self.processed_signatures = set()
         self.data_array: List[Dict[str, Any]] = []
-    
+
     async def rpc_request(self, method: str, params: List[Any]) -> Dict[str, Any]:
         data = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
         response = requests.post(self.rpc_endpoint, json=data)
         return response.json() if response.status_code == 200 else {}
-    
+
     async def get_recent_signatures(self, limit: int = 5) -> List[Dict[str, Any]]:
         params = [self.wallet_address, {"limit": limit}]
         resp = await self.rpc_request("getSignaturesForAddress", params)
         return resp.get('result', [])
-    
+
     async def get_transaction(self, signature: str) -> Dict[str, Any]:
         params = [signature, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}]
         resp = await self.rpc_request("getTransaction", params)
         return resp.get('result', {})
-    
+
     def parse_token_transfers(self, transaction: Dict[str, Any]) -> List[str]:
         mint_addresses = []
         if not transaction or 'transaction' not in transaction:
@@ -715,7 +715,7 @@ class WalletMonitor:
                     if 'mint' in info:
                         mint_addresses.append(info['mint'])
         return list(set(mint_addresses))
-    
+
     async def monitor_wallet(self):
         logger.info(f"Starting wallet monitor for {self.wallet_address}")
         while True:
@@ -764,7 +764,7 @@ class MemecoinBot:
         self.wallet_monitor = WalletMonitor(str(self.wallet_keypair.pubkey()), self.config.solana_rpc_url) if self.enable_monitor else None
         self.rug_analyzer = RugCheckAnalyzer(headless=True)
         self.positions: Dict[str, Dict[str, Any]] = {}
-    
+
     async def discovery_and_trade(self):
         while True:
             try:
@@ -810,7 +810,7 @@ class MemecoinBot:
             except Exception as e:
                 logger.error(f"Discovery error: {e}")
                 await asyncio.sleep(60)
-    
+
     async def run_bot(self):
         logger.info("MemecoinBot started.")
         tasks = []
@@ -830,7 +830,7 @@ class MemecoinBot:
 if __name__ == "__main__":
     # 测试语法和功能
     print("🧪 测试 memecoin_bot.py 功能...")
-    
+
     # 测试导入
     try:
         from memecoin_bot import fetch_trending_pairs, extract_memecoins, filter_and_sort_memecoins, parse_number, is_memecoin, MemecoinData
@@ -838,7 +838,7 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"❌ 导入失败: {e}")
         exit(1)
-    
+
     # 测试fetch_trending_pairs
     try:
         result = asyncio.run(fetch_trending_pairs())
@@ -847,7 +847,7 @@ if __name__ == "__main__":
             print(f"示例代币对: {result[0]['baseToken']['symbol']}")
     except Exception as e:
         print(f"❌ fetch_trending_pairs 测试失败: {e}")
-    
+
     # 测试完整流程
     try:
         pairs = asyncio.run(fetch_trending_pairs())
@@ -856,9 +856,9 @@ if __name__ == "__main__":
         print(f"✅ 完整流程测试成功: {len(pairs)} -> {len(memecoins)} -> {len(filtered)}")
     except Exception as e:
         print(f"❌ 完整流程测试失败: {e}")
-    
+
     print("🎉 所有测试通过！")
-    
+
     # 启动机器人（可选）
     # bot = MemecoinBot()
     # asyncio.run(bot.run_bot())
