@@ -116,6 +116,30 @@ git-status:
 	@echo "📊 Git 状态:"
 	git status
 
+# GitHub Actions 管理
+actions-status:
+	@echo "🔍 GitHub Actions 状态:"
+	@echo "部署状态: https://github.com/sengmu/solana-memecoin-bot/actions/workflows/deploy.yml"
+	@echo "代码质量: https://github.com/sengmu/solana-memecoin-bot/actions/workflows/quality.yml"
+	@echo "测试状态: https://github.com/sengmu/solana-memecoin-bot/actions/workflows/test.yml"
+	@echo "依赖更新: https://github.com/sengmu/solana-memecoin-bot/actions/workflows/dependencies.yml"
+
+trigger-deploy:
+	@echo "🚀 手动触发部署..."
+	gh workflow run deploy.yml
+
+trigger-quality:
+	@echo "🔍 手动触发代码质量检查..."
+	gh workflow run quality.yml
+
+trigger-test:
+	@echo "🧪 手动触发测试..."
+	gh workflow run test.yml
+
+trigger-deps:
+	@echo "📦 手动触发依赖更新..."
+	gh workflow run dependencies.yml
+
 # 数据库管理
 db-init:
 	@echo "🗄️  初始化数据库..."
