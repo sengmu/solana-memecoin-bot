@@ -71,7 +71,21 @@ class DashboardManager:
     def initialize_bot(self):
         """Initialize the bot with environment variables"""
         try:
-            config = BotConfig.from_env()
+            # Try to load from environment first
+            try:
+                config = BotConfig.from_env()
+            except Exception as env_error:
+                logger.warning(f"Environment config failed: {env_error}")
+                # Fallback to default config for demo
+                config = BotConfig(
+                    min_volume_24h=1000000,  # $1M
+                    min_fdv=100000,          # $100K
+                    max_position_size=0.1,   # 0.1 SOL
+                    max_slippage=0.05,       # 5%
+                    default_slippage=0.01,   # 1%
+                    meme_keywords=['meme', 'pepe', 'doge', 'shib', 'floki', 'bonk', 'wojak', 'chad', 'kekw', 'moon', 'degen']
+                )
+            
             self.bot = MemecoinBot(config)
             return True
         except Exception as e:
@@ -193,12 +207,14 @@ def render_sidebar(dashboard_manager):
         if not dashboard_manager.bot:
             if dashboard_manager.initialize_bot():
                 st.sidebar.success("机器人初始化成功!")
+                st.rerun()  # 重新运行以更新状态
             else:
                 st.sidebar.error("机器人初始化失败!")
         else:
             if not dashboard_manager.bot.running:
                 asyncio.create_task(dashboard_manager.bot.start_discovery())
                 st.sidebar.success("开始发现代币...")
+                st.rerun()  # 重新运行以更新状态
             else:
                 st.sidebar.warning("发现已在进行中...")
     
@@ -206,6 +222,7 @@ def render_sidebar(dashboard_manager):
         if dashboard_manager.bot and dashboard_manager.bot.running:
             dashboard_manager.bot.stop_discovery()
             st.sidebar.success("已停止发现...")
+            st.rerun()  # 重新运行以更新状态
         else:
             st.sidebar.warning("没有正在运行的发现任务...")
     
@@ -225,6 +242,7 @@ def render_sidebar(dashboard_manager):
                 try:
                     # This would be implemented in the actual bot
                     st.success(f"买入订单已下达 {trade_amount} SOL!")
+                    st.rerun()  # 重新运行以更新状态
                 except Exception as e:
                     st.error(f"买入失败: {e}")
             else:
@@ -236,6 +254,7 @@ def render_sidebar(dashboard_manager):
                 try:
                     # This would be implemented in the actual bot
                     st.success(f"卖出订单已下达!")
+                    st.rerun()  # 重新运行以更新状态
                 except Exception as e:
                     st.error(f"卖出失败: {e}")
             else:
