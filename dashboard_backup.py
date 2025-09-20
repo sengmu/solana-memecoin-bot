@@ -379,15 +379,15 @@ def render_trades_tab(dashboard: DashboardManager):
     st.divider()
     
     # Filters
-            col1, col2, col3 = st.columns(3)
+    col1, col2, col3 = st.columns(3)
     
-            with col1:
+    with col1:
         trade_type_filter = st.selectbox("按类型筛选", ["全部"] + list(trades_df['Type'].unique()))
     
-            with col2:
+    with col2:
         success_filter = st.selectbox("按成功筛选", ["全部", "仅成功", "仅失败"])
     
-            with col3:
+    with col3:
         date_range = st.date_input("日期范围", value=[datetime.now().date() - timedelta(days=7), datetime.now().date()])
     
     # Apply filters
