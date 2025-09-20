@@ -74,23 +74,73 @@ class DashboardManager:
             # Try to initialize bot with new BotConfig
             self.bot = MemecoinBot()
             return True
+        except (AttributeError, KeyError, TypeError) as e:
+            logger.error(f"Bot initialization failed due to missing .env or config: {e}")
+            # Fallback to MockBot with fetch_trending_pairs method
+            self.bot = self._create_mock_bot()
+            st.error("⚠️ 机器人初始化失败，请检查 .env 配置文件")
+            return False
         except Exception as e:
             logger.error(f"Bot initialization failed: {e}")
             # Fallback to MockBot for demo purposes
-            self.bot = type('MockBot', (), {
-                'running': False,
-                'discovered_tokens': {},
-                'trades': [],
-                'positions': {},
-                'trading_stats': type('MockStats', (), {
+            self.bot = self._create_mock_bot()
+            st.warning("⚠️ 机器人初始化失败，使用模拟数据演示")
+            return False
+    
+    def _create_mock_bot(self):
+        """Create a MockBot with all necessary methods"""
+        class MockBot:
+            def __init__(self):
+                self.running = False
+                self.discovered_tokens = {}
+                self.trades = []
+                self.positions = {}
+                self.trading_stats = type('MockStats', (), {
                     'total_trades': 0,
                     'successful_trades': 0,
                     'total_volume': 0.0,
                     'total_pnl': 0.0
                 })()
-            })()
-            st.warning("⚠️ 机器人初始化失败，使用模拟数据演示")
-            return False
+                # Create a mock dexscreener_client
+                self.dexscreener_client = type('MockDexScreenerClient', (), {
+                    'fetch_trending_pairs': self.fetch_trending_pairs
+                })()
+            
+            async def fetch_trending_pairs(self, max_pairs=50):
+                """Mock fetch_trending_pairs method"""
+                sample_data = [
+                    {
+                        "baseToken": {"name": "Test Token 1", "symbol": "TST1", "address": "test123"},
+                        "fdv": 1000000,
+                        "volume": {"h24": 2000000},
+                        "priceChange": {"h24": 10}
+                    },
+                    {
+                        "baseToken": {"name": "Test Token 2", "symbol": "TST2", "address": "test456"},
+                        "fdv": 2000000,
+                        "volume": {"h24": 3000000},
+                        "priceChange": {"h24": -5}
+                    },
+                    {
+                        "baseToken": {"name": "Test Token 3", "symbol": "TST3", "address": "test789"},
+                        "fdv": 5000000,
+                        "volume": {"h24": 1000000},
+                        "priceChange": {"h24": 25}
+                    }
+                ]
+                return sample_data[:max_pairs]
+            
+            def start_discovery(self):
+                """Mock start_discovery method"""
+                self.running = True
+                return True
+            
+            def stop_discovery(self):
+                """Mock stop_discovery method"""
+                self.running = False
+                return True
+        
+        return MockBot()
     
     def get_discovered_tokens(self):
         """Get discovered tokens data"""
@@ -205,14 +255,20 @@ class DashboardManager:
                 address=f"mock_address_{i}_{random.randint(1000, 9999)}",
                 symbol=symbol,
                 name=f"{symbol} Token",
+                decimals=9,
                 price=random.uniform(0.000001, 0.01),
-                volume_24h=random.uniform(100000, 10000000),
+                market_cap=random.uniform(1000000, 100000000),
                 fdv=random.uniform(1000000, 100000000),
-                change_24h=random.uniform(-50, 100),
+                volume_24h=random.uniform(100000, 10000000),
+                price_change_24h=random.uniform(-50, 100),
+                liquidity=random.uniform(100000, 1000000),
+                holders=random.randint(100, 10000),
+                created_at=datetime.now(),
                 status=random.choice([TokenStatus.PENDING, TokenStatus.APPROVED, TokenStatus.TRADING]),
-                discovered_at=datetime.now(),
                 twitter_score=random.uniform(0, 100),
-                rugcheck_score=random.uniform(0, 100)
+                rugcheck_score=str(random.uniform(0, 100)),
+                confidence_score=random.uniform(0, 1),
+                is_memecoin=True
             )
             mock_tokens.append(token)
         
@@ -322,22 +378,57 @@ def render_discovery_tab(dashboard_manager):
     
     with col1:
         if st.button("🔄 刷新发现", type="primary"):
-            if dashboard_manager.bot and hasattr(dashboard_manager.bot, 'dexscreener_client'):
-                try:
-                    # Fetch real trending pairs
-                    import asyncio
-                    trending_pairs = asyncio.run(dashboard_manager.bot.dexscreener_client.fetch_trending_pairs(max_pairs=50))
-                    
-                    # Update discovered tokens
-                    for token in trending_pairs:
+            if dashboard_manager.bot is None:
+                st.error("❌ 机器人未初始化")
+                return
+            
+            try:
+                # Fetch trending pairs
+                import asyncio
+                trending_pairs = asyncio.run(dashboard_manager.bot.dexscreener_client.fetch_trending_pairs(max_pairs=50))
+                
+                if not trending_pairs:
+                    st.warning("⚠️ 未获取到代币数据，使用模拟数据")
+                    # Generate mock tokens as fallback
+                    mock_tokens = dashboard_manager.generate_mock_tokens(15)
+                    for token in mock_tokens:
                         dashboard_manager.bot.discovered_tokens[token.address] = token
+                    st.success(f"✅ 已加载 {len(mock_tokens)} 个模拟代币!")
+                else:
+                    # Convert trending pairs to TokenInfo objects
+                    from models import TokenInfo, TokenStatus
+                    for pair in trending_pairs:
+                        try:
+                            token = TokenInfo(
+                                address=pair.get("baseToken", {}).get("address", f"mock_{pair.get('baseToken', {}).get('symbol', 'UNK')}"),
+                                symbol=pair.get("baseToken", {}).get("symbol", "UNK"),
+                                name=pair.get("baseToken", {}).get("name", "Unknown Token"),
+                                decimals=9,
+                                price=0.001,  # Mock price
+                                market_cap=pair.get("fdv", 1000000),
+                                fdv=pair.get("fdv", 1000000),
+                                volume_24h=pair.get("volume", {}).get("h24", 1000000),
+                                price_change_24h=pair.get("priceChange", {}).get("h24", 0),
+                                liquidity=100000,
+                                holders=1000,
+                                created_at=datetime.now(),
+                                status=TokenStatus.PENDING,
+                                twitter_score=0.0,
+                                rugcheck_score="0.0",
+                                confidence_score=0.5,
+                                is_memecoin=True
+                            )
+                            dashboard_manager.bot.discovered_tokens[token.address] = token
+                        except Exception as e:
+                            logger.warning(f"Error creating token from pair: {e}")
+                            continue
                     
                     st.success(f"✅ 成功获取 {len(trending_pairs)} 个热门代币!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ 获取代币失败: {e}")
-            else:
-                st.warning("⚠️ 机器人未初始化，无法获取真实数据")
+                
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ 获取代币失败: {e}")
+                logger.error(f"Error in refresh discovery: {e}")
     
     with col2:
         if st.button("📊 显示模拟数据"):
@@ -748,4 +839,24 @@ def main():
 
 if __name__ == "__main__":
     print("Dashboard fixed, run streamlit run dashboard.py")
+    
+    # Test bot initialization
+    print("\nTesting bot initialization...")
+    dashboard_manager = DashboardManager()
+    success = dashboard_manager.initialize_bot()
+    if success and dashboard_manager.bot:
+        print("✅ Bot initialized successfully")
+        # Test fetch_trending_pairs
+        import asyncio
+        try:
+            if hasattr(dashboard_manager.bot, 'dexscreener_client') and dashboard_manager.bot.dexscreener_client:
+                pairs = asyncio.run(dashboard_manager.bot.dexscreener_client.fetch_trending_pairs())
+                print(f"✅ fetch_trending_pairs returned {len(pairs)} pairs")
+            else:
+                print("❌ dexscreener_client is None or missing")
+        except Exception as e:
+            print(f"❌ fetch_trending_pairs failed: {e}")
+    else:
+        print("❌ Bot initialization failed")
+    
     main()
