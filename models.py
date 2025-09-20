@@ -176,6 +176,18 @@ class BotConfig:
     stop_loss_percentage: float
     take_profit_percentage: float
     
+    # OpenSolBot 增强配置
+    leader_wallets: List[str] = field(default_factory=list)
+    copy_ratio: float = 1.0
+    geyser_endpoint: Optional[str] = None
+    geyser_token: Optional[str] = None
+    telegram_bot_token: Optional[str] = None
+    telegram_chat_id: Optional[str] = None
+    helius_api_key: Optional[str] = None
+    shyft_api_key: Optional[str] = None
+    jupiter_api_key: Optional[str] = None
+    raydium_api_key: Optional[str] = None
+    
     # Memecoin Keywords
     meme_keywords: List[str] = field(default_factory=lambda: [
         'meme', 'doge', 'shib', 'pepe', 'wojak', 'chad', 'based', 'gm', 'wagmi',

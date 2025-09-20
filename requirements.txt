@@ -15,5 +15,12 @@ aiohttp>=3.9.0
 websockets>=15.0.0
 beautifulsoup4>=4.13.0
 
-# Optional: Selenium (may cause issues in cloud deployment)
-# selenium>=4.35.0
+# OpenSolBot 增强功能依赖
+python-telegram-bot>=20.0
+aiofiles>=23.0.0
+asyncio-mqtt>=0.16.0
+pydantic>=2.0.0
+httpx>=0.28.0
+
+# 可选依赖
+# selenium>=4.35.0  # 可能在某些部署环境中造成问题

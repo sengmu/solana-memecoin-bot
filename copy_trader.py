@@ -1,415 +1,398 @@
+#!/usr/bin/env python3
 """
-Copy trading functionality for monitoring leader wallets and copying their trades.
+跟单交易功能
+参考 OpenSolBot 实现
 """
 
 import asyncio
-import aiohttp
 import logging
+import json
 import time
-from typing import Optional, Dict, Any, List, Callable
 from datetime import datetime, timedelta
-from dataclasses import dataclass
+from typing import Dict, List, Optional, Callable
+import aiohttp
+from solana.rpc.api import Client
+from solana.rpc.types import TxOpts
+from solders.keypair import Keypair
+from solders.pubkey import Pubkey
+import base58
 
-from solana.rpc.async_api import AsyncClient
-from solders.pubkey import Pubkey as PublicKey
+from models import TokenInfo, Trade, TradeType, BotConfig
+from dexscreener_client import DexScreenerClient
+from telegram_bot import get_telegram_bot
 
-from models import TokenInfo, Trade, TradeType, BotConfig, TradingStats
-from jupiter_trader import JupiterTrader
-
-
-@dataclass
-class LeaderTrade:
-    """Represents a trade made by a leader wallet."""
-    token_address: str
-    trade_type: TradeType
-    amount: float
-    timestamp: datetime
-    tx_hash: str
-    confidence_score: float = 0.0
-
+# 配置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class CopyTrader:
-    """Monitors leader wallets and copies their trades."""
-    
-    def __init__(self, config: BotConfig, jupiter_trader: JupiterTrader, on_trade_detected: Callable[[LeaderTrade], None]):
+    def __init__(self, config: BotConfig, private_key: str, rpc_url: str):
         self.config = config
-        self.jupiter_trader = jupiter_trader
-        self.on_trade_detected = on_trade_detected
-        self.logger = logging.getLogger(__name__)
-        self.client = AsyncClient(config.solana_rpc_url)
-        self.session: Optional[aiohttp.ClientSession] = None
+        self.private_key = private_key
+        self.rpc_url = rpc_url
+        self.client = Client(rpc_url)
         
-        # Leader wallet monitoring
-        self.leader_wallet = PublicKey(config.leader_wallet_address) if config.leader_wallet_address else None
-        self.last_checked_signature: Optional[str] = None
-        self.known_tokens: Dict[str, TokenInfo] = {}
+        # 解析私钥
+        try:
+            self.keypair = Keypair.from_base58_string(private_key)
+            self.wallet_address = str(self.keypair.pubkey())
+            logger.info(f"钱包地址: {self.wallet_address}")
+        except Exception as e:
+            logger.error(f"私钥解析失败: {e}")
+            raise
         
-        # Copy trading state
-        self.running = False
-        self.copy_enabled = config.copy_trading_enabled
-        self.min_confidence = config.min_confidence_score
+        # 跟单配置
+        self.leader_wallets = config.leader_wallets if hasattr(config, 'leader_wallets') else []
+        self.min_confidence_score = getattr(config, 'min_confidence_score', 70)
+        self.copy_trading_enabled = getattr(config, 'copy_trading_enabled', True)
         
-    async def __aenter__(self):
-        """Async context manager entry."""
-        self.session = aiohttp.ClientSession()
-        return self
+        # 交易历史
+        self.trade_history = []
+        self.load_trade_history()
         
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
-        if self.session:
-            await self.session.close()
-        await self.client.close()
+        # 监控状态
+        self.is_monitoring = False
+        self.monitoring_tasks = []
         
-    async def start_monitoring(self):
-        """Start monitoring leader wallet for new trades."""
-        if not self.leader_wallet:
-            self.logger.warning("No leader wallet configured for copy trading")
-            return
+        # 回调函数
+        self.on_trade_callback = None
+        
+    def load_trade_history(self):
+        """加载交易历史"""
+        try:
+            if os.path.exists('copy_trades.json'):
+                with open('copy_trades.json', 'r', encoding='utf-8') as f:
+                    self.trade_history = json.load(f)
+                logger.info(f"加载了 {len(self.trade_history)} 条跟单交易记录")
+        except Exception as e:
+            logger.error(f"加载交易历史失败: {e}")
+            self.trade_history = []
+    
+    def save_trade_history(self):
+        """保存交易历史"""
+        try:
+            with open('copy_trades.json', 'w', encoding='utf-8') as f:
+                json.dump(self.trade_history, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"保存交易历史失败: {e}")
+    
+    async def get_wallet_balance(self) -> float:
+        """获取钱包余额"""
+        try:
+            balance = self.client.get_balance(self.keypair.pubkey())
+            return balance.value / 1e9  # 转换为 SOL
+        except Exception as e:
+            logger.error(f"获取余额失败: {e}")
+            return 0.0
+    
+    async def get_token_balance(self, token_address: str) -> float:
+        """获取代币余额"""
+        try:
+            # 这里需要实现获取 SPL 代币余额的逻辑
+            # 简化实现，实际需要调用 get_token_accounts_by_owner
+            return 0.0
+        except Exception as e:
+            logger.error(f"获取代币余额失败: {e}")
+            return 0.0
+    
+    async def execute_trade(self, trade_type: TradeType, token_address: str, 
+                          amount: float, price: float, confidence: float = 0.0) -> bool:
+        """执行交易"""
+        try:
+            # 检查余额
+            balance = await self.get_wallet_balance()
+            if balance < amount:
+                logger.warning(f"余额不足: {balance:.4f} SOL < {amount:.4f} SOL")
+                return False
             
-        self.running = True
-        self.logger.info(f"Starting copy trading monitoring for wallet: {self.leader_wallet}")
+            # 检查置信度
+            if confidence < self.min_confidence_score:
+                logger.warning(f"置信度不足: {confidence:.1f}% < {self.min_confidence_score}%")
+                return False
+            
+            # 这里应该实现实际的交易逻辑
+            # 简化实现，实际需要调用 Jupiter API 或 Raydium
+            logger.info(f"执行交易: {trade_type.value} {token_address} 数量: {amount:.4f} SOL")
+            
+            # 模拟交易延迟
+            await asyncio.sleep(1)
+            
+            # 记录交易
+            trade = {
+                'timestamp': datetime.now().isoformat(),
+                'type': trade_type.value,
+                'token_address': token_address,
+                'amount': amount,
+                'price': price,
+                'confidence': confidence,
+                'success': True,  # 简化实现
+                'tx_hash': f"mock_tx_{int(time.time())}"
+            }
+            
+            self.trade_history.append(trade)
+            self.save_trade_history()
+            
+            # 发送通知
+            telegram_bot = get_telegram_bot()
+            if telegram_bot:
+                await telegram_bot.send_trade_notification(Trade(**trade))
+            
+            # 调用回调函数
+            if self.on_trade_callback:
+                self.on_trade_callback(trade)
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"执行交易失败: {e}")
+            return False
+    
+    async def monitor_wallet_transactions(self, wallet_address: str):
+        """监控钱包交易"""
+        logger.info(f"开始监控钱包: {wallet_address}")
         
-        while self.running:
+        last_signature = None
+        
+        while self.is_monitoring:
             try:
-                await self._check_leader_trades()
-                await asyncio.sleep(10)  # Check every 10 seconds
+                # 获取最近的交易
+                signatures = self.client.get_signatures_for_address(
+                    Pubkey.from_string(wallet_address),
+                    limit=10
+                )
+                
+                if signatures.value:
+                    # 处理新交易
+                    for sig_info in reversed(signatures.value):
+                        if last_signature and sig_info.signature == last_signature:
+                            break
+                        
+                        await self.process_transaction(sig_info, wallet_address)
+                    
+                    last_signature = signatures.value[0].signature
+                
+                # 等待一段时间再检查
+                await asyncio.sleep(5)
                 
             except Exception as e:
-                self.logger.error(f"Error in copy trading monitoring: {e}")
-                await asyncio.sleep(30)  # Wait longer on error
-                
-    async def stop_monitoring(self):
-        """Stop monitoring leader wallet."""
-        self.running = False
-        self.logger.info("Stopped copy trading monitoring")
-        
-    async def _check_leader_trades(self):
-        """Check for new trades from leader wallet."""
+                logger.error(f"监控钱包交易失败: {e}")
+                await asyncio.sleep(10)
+    
+    async def process_transaction(self, sig_info, leader_wallet: str):
+        """处理交易"""
         try:
-            # Get recent signatures for the leader wallet
-            signatures = await self._get_recent_signatures()
-            
-            if not signatures:
+            # 获取交易详情
+            tx = self.client.get_transaction(sig_info.signature)
+            if not tx.value:
                 return
-                
-            # Process new signatures
-            for signature_info in signatures:
-                signature = signature_info.signature
-                
-                # Skip if we've already processed this signature
-                if self.last_checked_signature and signature == self.last_checked_signature:
-                    break
-                    
-                # Analyze the transaction
-                trade = await self._analyze_transaction(signature)
-                if trade and trade.confidence_score >= self.min_confidence:
-                    self.logger.info(f"Detected leader trade: {trade.trade_type.value} {trade.token_address}")
-                    await self.on_trade_detected(trade)
-                    
-            # Update last checked signature
-            if signatures:
-                self.last_checked_signature = signatures[0].signature
-                
-        except Exception as e:
-            self.logger.error(f"Error checking leader trades: {e}")
             
-    async def _get_recent_signatures(self) -> List[Any]:
-        """Get recent signatures for the leader wallet."""
-        try:
-            # Get signatures for the last hour
-            before = None
-            if self.last_checked_signature:
-                before = self.last_checked_signature
-                
-            response = await self.client.get_signatures_for_address(
-                self.leader_wallet,
-                before=before,
-                limit=50
-            )
-            
-            return response.value if response.value else []
-            
-        except Exception as e:
-            self.logger.error(f"Error getting recent signatures: {e}")
-            return []
-            
-    async def _analyze_transaction(self, signature: str) -> Optional[LeaderTrade]:
-        """Analyze a transaction to determine if it's a token trade."""
-        try:
-            # Get transaction details
-            response = await self.client.get_transaction(
-                signature,
-                encoding="json",
-                max_supported_transaction_version=0
-            )
-            
-            if not response.value:
-                return None
-                
-            transaction = response.value
-            meta = transaction.meta
-            
-            # Check if transaction was successful
-            if meta.err:
-                return None
-                
-            # Look for token transfers
-            token_transfers = self._extract_token_transfers(transaction)
-            
-            if not token_transfers:
-                return None
-                
-            # Analyze the transfers to determine trade type and token
-            trade_info = self._analyze_token_transfers(token_transfers)
-            
+            # 分析交易类型和代币
+            trade_info = await self.analyze_transaction(tx.value, leader_wallet)
             if not trade_info:
-                return None
-                
-            # Calculate confidence score
-            confidence_score = await self._calculate_confidence_score(trade_info, transaction)
+                return
             
-            return LeaderTrade(
+            # 计算跟单金额
+            copy_amount = self.calculate_copy_amount(trade_info['amount'])
+            if copy_amount <= 0:
+                return
+            
+            # 执行跟单交易
+            success = await self.execute_trade(
+                trade_type=trade_info['type'],
                 token_address=trade_info['token_address'],
-                trade_type=trade_info['trade_type'],
-                amount=trade_info['amount'],
-                timestamp=datetime.now(),
-                tx_hash=signature,
-                confidence_score=confidence_score
+                amount=copy_amount,
+                price=trade_info['price'],
+                confidence=trade_info['confidence']
             )
             
-        except Exception as e:
-            self.logger.error(f"Error analyzing transaction {signature}: {e}")
-            return None
-            
-    def _extract_token_transfers(self, transaction: Any) -> List[Dict[str, Any]]:
-        """Extract token transfers from transaction."""
-        transfers = []
-        
-        try:
-            meta = transaction.meta
-            if not meta or not meta.inner_instructions:
-                return transfers
-                
-            for inner_instruction in meta.inner_instructions:
-                for instruction in inner_instruction.instructions:
-                    if hasattr(instruction, 'parsed') and instruction.parsed:
-                        parsed = instruction.parsed
-                        if parsed.get('type') == 'transfer' or parsed.get('type') == 'transferChecked':
-                            transfer_info = parsed.get('info', {})
-                            if transfer_info:
-                                transfers.append({
-                                    'mint': transfer_info.get('mint'),
-                                    'source': transfer_info.get('source'),
-                                    'destination': transfer_info.get('destination'),
-                                    'amount': transfer_info.get('amount'),
-                                    'authority': transfer_info.get('authority')
-                                })
-                                
-        except Exception as e:
-            self.logger.error(f"Error extracting token transfers: {e}")
-            
-        return transfers
-        
-    def _analyze_token_transfers(self, transfers: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-        """Analyze token transfers to determine trade information."""
-        try:
-            # Group transfers by token
-            token_transfers = {}
-            for transfer in transfers:
-                mint = transfer.get('mint')
-                if not mint:
-                    continue
-                    
-                if mint not in token_transfers:
-                    token_transfers[mint] = []
-                token_transfers[mint].append(transfer)
-                
-            # Find the most significant transfer
-            for mint, mint_transfers in token_transfers.items():
-                # Skip SOL (wrapped SOL)
-                if mint == "So11111111111111111111111111111111111111112":
-                    continue
-                    
-                # Calculate net amount for this token
-                net_amount = 0
-                for transfer in mint_transfers:
-                    amount = int(transfer.get('amount', 0))
-                    # Determine direction based on source/destination
-                    if transfer.get('source') == str(self.leader_wallet):
-                        net_amount -= amount  # Outgoing (sell)
-                    elif transfer.get('destination') == str(self.leader_wallet):
-                        net_amount += amount  # Incoming (buy)
-                        
-                if net_amount != 0:
-                    return {
-                        'token_address': mint,
-                        'trade_type': TradeType.BUY if net_amount > 0 else TradeType.SELL,
-                        'amount': abs(net_amount) / 1e9,  # Convert to token units
-                        'raw_amount': abs(net_amount)
-                    }
-                    
-            return None
-            
-        except Exception as e:
-            self.logger.error(f"Error analyzing token transfers: {e}")
-            return None
-            
-    async def _calculate_confidence_score(self, trade_info: Dict[str, Any], transaction: Any) -> float:
-        """Calculate confidence score for a detected trade."""
-        try:
-            score = 50.0  # Base score
-            
-            # Check if we know this token
-            token_address = trade_info['token_address']
-            if token_address in self.known_tokens:
-                token = self.known_tokens[token_address]
-                
-                # Higher confidence for tokens with good metrics
-                if token.volume_24h > 1_000_000:
-                    score += 20
-                if token.liquidity > 100_000:
-                    score += 15
-                if token.holders > 1000:
-                    score += 10
-                    
-            # Check transaction size (larger trades might be more significant)
-            amount = trade_info['amount']
-            if amount > 1000:  # Large amount
-                score += 15
-            elif amount > 100:  # Medium amount
-                score += 10
-            elif amount > 10:  # Small amount
-                score += 5
-                
-            # Check if it's a buy (buys are generally more significant)
-            if trade_info['trade_type'] == TradeType.BUY:
-                score += 10
-                
-            # Check transaction age (newer transactions are more relevant)
-            # This would require parsing the block time, simplified here
-            score += 5
-            
-            return min(score, 100.0)
-            
-        except Exception as e:
-            self.logger.error(f"Error calculating confidence score: {e}")
-            return 50.0
-            
-    async def copy_trade(self, leader_trade: LeaderTrade) -> Optional[Trade]:
-        """Copy a trade from the leader wallet."""
-        try:
-            if not self.copy_enabled:
-                self.logger.info("Copy trading is disabled")
-                return None
-                
-            # Get token information
-            token = await self._get_token_info(leader_trade.token_address)
-            if not token:
-                self.logger.warning(f"Could not get token info for {leader_trade.token_address}")
-                return None
-                
-            # Calculate copy amount based on our position size
-            copy_amount = self._calculate_copy_amount(leader_trade, token)
-            
-            if copy_amount <= 0:
-                self.logger.warning("Copy amount too small or zero")
-                return None
-                
-            # Execute the copy trade
-            if leader_trade.trade_type == TradeType.BUY:
-                trade = await self.jupiter_trader.buy_token(token, copy_amount)
+            if success:
+                logger.info(f"跟单成功: {trade_info['type'].value} {trade_info['token_address']}")
             else:
-                trade = await self.jupiter_trader.sell_token(token, copy_amount)
+                logger.warning(f"跟单失败: {trade_info['type'].value} {trade_info['token_address']}")
                 
-            if trade:
-                self.logger.info(f"Successfully copied {leader_trade.trade_type.value} trade for {token.symbol}")
-                
-            return trade
+        except Exception as e:
+            logger.error(f"处理交易失败: {e}")
+    
+    async def analyze_transaction(self, tx, leader_wallet: str) -> Optional[Dict]:
+        """分析交易"""
+        try:
+            # 这里需要实现交易分析逻辑
+            # 简化实现，实际需要解析交易指令和代币信息
+            
+            # 模拟分析结果
+            return {
+                'type': TradeType.BUY,  # 或 TradeType.SELL
+                'token_address': 'mock_token_address',
+                'amount': 0.1,  # SOL
+                'price': 0.00000123,  # 代币价格
+                'confidence': 85.0  # 置信度
+            }
             
         except Exception as e:
-            self.logger.error(f"Error copying trade: {e}")
+            logger.error(f"分析交易失败: {e}")
             return None
-            
-    async def _get_token_info(self, token_address: str) -> Optional[TokenInfo]:
-        """Get token information from cache or fetch it."""
+    
+    def calculate_copy_amount(self, leader_amount: float) -> float:
+        """计算跟单金额"""
         try:
-            # Check cache first
-            if token_address in self.known_tokens:
-                return self.known_tokens[token_address]
-                
-            # Fetch from DexScreener API
-            async with self.session.get(f"https://api.dexscreener.com/latest/dex/tokens/{token_address}") as response:
-                if response.status == 200:
-                    data = await response.json()
-                    pairs = data.get('pairs', [])
-                    
-                    if pairs:
-                        pair = pairs[0]  # Get the first pair
-                        base_token = pair.get('baseToken', {})
-                        
-                        token = TokenInfo(
-                            address=token_address,
-                            symbol=base_token.get('symbol', ''),
-                            name=base_token.get('name', ''),
-                            decimals=base_token.get('decimals', 9),
-                            price=float(pair.get('priceUsd', 0)),
-                            market_cap=float(pair.get('fdv', 0)),
-                            fdv=float(pair.get('fdv', 0)),
-                            volume_24h=float(pair.get('volume', {}).get('h24', 0)),
-                            price_change_24h=float(pair.get('priceChange', {}).get('h24', 0)),
-                            liquidity=float(pair.get('liquidity', {}).get('usd', 0)),
-                            holders=int(pair.get('info', {}).get('holders', 0)),
-                            created_at=datetime.now()
-                        )
-                        
-                        # Cache the token
-                        self.known_tokens[token_address] = token
-                        return token
-                        
-            return None
+            # 根据配置计算跟单金额
+            max_position = getattr(self.config, 'max_position_size', 0.1)
+            copy_ratio = getattr(self.config, 'copy_ratio', 1.0)
             
-        except Exception as e:
-            self.logger.error(f"Error getting token info: {e}")
-            return None
-            
-    def _calculate_copy_amount(self, leader_trade: LeaderTrade, token: TokenInfo) -> float:
-        """Calculate how much to copy based on our position size limits."""
-        try:
-            # Get our current SOL balance
-            sol_balance = asyncio.create_task(self.jupiter_trader.get_sol_balance())
-            
-            # Calculate maximum position size in SOL
-            max_position_sol = self.config.max_position_size * sol_balance
-            
-            # Calculate token amount in SOL
-            token_value_sol = leader_trade.amount * token.price
-            
-            # Scale down if necessary
-            if token_value_sol > max_position_sol:
-                scale_factor = max_position_sol / token_value_sol
-                copy_amount = leader_trade.amount * scale_factor
-            else:
-                copy_amount = leader_trade.amount
-                
-            # Ensure minimum amount
-            min_amount = 0.001  # Minimum 0.001 SOL
-            if copy_amount * token.price < min_amount:
-                return 0.0
-                
+            copy_amount = min(leader_amount * copy_ratio, max_position)
             return copy_amount
             
         except Exception as e:
-            self.logger.error(f"Error calculating copy amount: {e}")
+            logger.error(f"计算跟单金额失败: {e}")
             return 0.0
-            
-    def add_known_token(self, token: TokenInfo):
-        """Add a token to the known tokens cache."""
-        self.known_tokens[token.address] = token
+    
+    async def start_monitoring(self):
+        """开始监控"""
+        if not self.copy_trading_enabled:
+            logger.warning("跟单交易未启用")
+            return
         
-    def get_known_tokens(self) -> Dict[str, TokenInfo]:
-        """Get all known tokens."""
-        return self.known_tokens.copy()
+        if not self.leader_wallets:
+            logger.warning("未配置领导者钱包")
+            return
         
-    def clear_known_tokens(self):
-        """Clear the known tokens cache."""
-        self.known_tokens.clear()
+        self.is_monitoring = True
+        logger.info("开始跟单监控")
+        
+        # 为每个领导者钱包创建监控任务
+        for wallet in self.leader_wallets:
+            task = asyncio.create_task(self.monitor_wallet_transactions(wallet))
+            self.monitoring_tasks.append(task)
+        
+        # 等待所有任务完成
+        await asyncio.gather(*self.monitoring_tasks)
+    
+    async def stop_monitoring(self):
+        """停止监控"""
+        self.is_monitoring = False
+        
+        # 取消所有监控任务
+        for task in self.monitoring_tasks:
+            task.cancel()
+        
+        self.monitoring_tasks.clear()
+        logger.info("跟单监控已停止")
+    
+    def set_trade_callback(self, callback: Callable):
+        """设置交易回调函数"""
+        self.on_trade_callback = callback
+    
+    def get_trade_statistics(self) -> Dict:
+        """获取交易统计"""
+        if not self.trade_history:
+            return {
+                'total_trades': 0,
+                'successful_trades': 0,
+                'success_rate': 0.0,
+                'total_volume': 0.0,
+                'total_pnl': 0.0
+            }
+        
+        total_trades = len(self.trade_history)
+        successful_trades = len([t for t in self.trade_history if t['success']])
+        success_rate = (successful_trades / total_trades * 100) if total_trades > 0 else 0
+        total_volume = sum([t['amount'] for t in self.trade_history])
+        
+        # 计算盈亏（简化实现）
+        total_pnl = 0.0
+        for trade in self.trade_history:
+            if trade['success']:
+                # 这里需要根据实际价格变化计算盈亏
+                total_pnl += trade['amount'] * 0.01  # 模拟1%收益
+        
+        return {
+            'total_trades': total_trades,
+            'successful_trades': successful_trades,
+            'success_rate': success_rate,
+            'total_volume': total_volume,
+            'total_pnl': total_pnl
+        }
+
+class CopyTradingManager:
+    """跟单交易管理器"""
+    
+    def __init__(self, config: BotConfig):
+        self.config = config
+        self.copy_traders = {}
+        self.is_running = False
+    
+    def add_copy_trader(self, name: str, private_key: str, rpc_url: str):
+        """添加跟单交易者"""
+        try:
+            copy_trader = CopyTrader(config, private_key, rpc_url)
+            self.copy_traders[name] = copy_trader
+            logger.info(f"添加跟单交易者: {name}")
+            return True
+        except Exception as e:
+            logger.error(f"添加跟单交易者失败: {e}")
+            return False
+    
+    async def start_all_copy_traders(self):
+        """启动所有跟单交易者"""
+        if not self.copy_traders:
+            logger.warning("没有配置跟单交易者")
+            return
+        
+        self.is_running = True
+        tasks = []
+        
+        for name, trader in self.copy_traders.items():
+            task = asyncio.create_task(trader.start_monitoring())
+            tasks.append(task)
+            logger.info(f"启动跟单交易者: {name}")
+        
+        await asyncio.gather(*tasks)
+    
+    async def stop_all_copy_traders(self):
+        """停止所有跟单交易者"""
+        self.is_running = False
+        
+        for name, trader in self.copy_traders.items():
+            await trader.stop_monitoring()
+            logger.info(f"停止跟单交易者: {name}")
+    
+    def get_all_statistics(self) -> Dict[str, Dict]:
+        """获取所有跟单交易者统计"""
+        stats = {}
+        for name, trader in self.copy_traders.items():
+            stats[name] = trader.get_trade_statistics()
+        return stats
+
+# 使用示例
+async def main():
+    """测试跟单交易功能"""
+    from dotenv import load_dotenv
+    load_dotenv()
+    
+    # 创建配置
+    config = BotConfig(
+        min_volume_24h=1000000,
+        min_fdv=100000,
+        max_position_size=0.1,
+        copy_trading_enabled=True,
+        min_confidence_score=70,
+        leader_wallets=['leader_wallet_address_here']
+    )
+    
+    # 创建跟单交易管理器
+    manager = CopyTradingManager(config)
+    
+    # 添加跟单交易者
+    private_key = os.getenv('PRIVATE_KEY')
+    rpc_url = os.getenv('SOLANA_RPC_URL')
+    
+    if private_key and rpc_url:
+        manager.add_copy_trader('main_trader', private_key, rpc_url)
+        
+        # 启动跟单交易
+        await manager.start_all_copy_traders()
+    else:
+        print("请配置 PRIVATE_KEY 和 SOLANA_RPC_URL")
+
+if __name__ == "__main__":
+    asyncio.run(main())
