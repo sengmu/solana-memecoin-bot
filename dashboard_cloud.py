@@ -70,7 +70,7 @@ class CloudDashboardManager:
     
     def get_discovered_tokens(self):
         """Get discovered tokens data (mock data for demo)"""
-        # Mock data for demonstration - 10 popular memecoins
+        # Mock data for demonstration - 15 popular memecoins
         mock_tokens = [
             {
                 'Symbol': 'PEPE',
@@ -155,6 +155,102 @@ class CloudDashboardManager:
                 'RugCheck Score': 71.2,
                 'Status': 'approved',
                 'Discovered At': '2024-01-20 20:15:00'
+            },
+            {
+                'Symbol': 'KEKW',
+                'Name': 'Kekw Token',
+                'Address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB267',
+                'Price': 0.00000234,
+                'Volume24h': 800000,
+                'FDV': 15000000,
+                'Twitter Score': 68.9,
+                'RugCheck Score': 65.4,
+                'Status': 'pending',
+                'Discovered At': '2024-01-20 21:30:00'
+            },
+            {
+                'Symbol': 'MOON',
+                'Name': 'Moon Token',
+                'Address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB268',
+                'Price': 0.00000987,
+                'Volume24h': 2200000,
+                'FDV': 40000000,
+                'Twitter Score': 85.7,
+                'RugCheck Score': 82.1,
+                'Status': 'trading',
+                'Discovered At': '2024-01-20 22:45:00'
+            },
+            {
+                'Symbol': 'DEGEN',
+                'Name': 'Degen Token',
+                'Address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB269',
+                'Price': 0.00000156,
+                'Volume24h': 1500000,
+                'FDV': 30000000,
+                'Twitter Score': 77.2,
+                'RugCheck Score': 73.8,
+                'Status': 'approved',
+                'Discovered At': '2024-01-20 23:20:00'
+            },
+            {
+                'Symbol': 'APE',
+                'Name': 'Ape Token',
+                'Address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB270',
+                'Price': 0.00001234,
+                'Volume24h': 1800000,
+                'FDV': 35000000,
+                'Twitter Score': 81.4,
+                'RugCheck Score': 78.6,
+                'Status': 'trading',
+                'Discovered At': '2024-01-21 00:10:00'
+            },
+            {
+                'Symbol': 'MONKE',
+                'Name': 'Monke Token',
+                'Address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB271',
+                'Price': 0.00000078,
+                'Volume24h': 600000,
+                'FDV': 12000000,
+                'Twitter Score': 71.8,
+                'RugCheck Score': 68.3,
+                'Status': 'pending',
+                'Discovered At': '2024-01-21 01:25:00'
+            },
+            {
+                'Symbol': 'FROG',
+                'Name': 'Frog Token',
+                'Address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB272',
+                'Price': 0.00000456,
+                'Volume24h': 1100000,
+                'FDV': 22000000,
+                'Twitter Score': 76.5,
+                'RugCheck Score': 72.9,
+                'Status': 'approved',
+                'Discovered At': '2024-01-21 02:40:00'
+            },
+            {
+                'Symbol': 'CAT',
+                'Name': 'Cat Token',
+                'Address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB273',
+                'Price': 0.00000098,
+                'Volume24h': 700000,
+                'FDV': 14000000,
+                'Twitter Score': 69.2,
+                'RugCheck Score': 66.7,
+                'Status': 'pending',
+                'Discovered At': '2024-01-21 03:55:00'
+            },
+            {
+                'Symbol': 'DOG',
+                'Name': 'Dog Token',
+                'Address': 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB274',
+                'Price': 0.00000034,
+                'Volume24h': 500000,
+                'FDV': 8000000,
+                'Twitter Score': 63.7,
+                'RugCheck Score': 60.1,
+                'Status': 'pending',
+                'Discovered At': '2024-01-21 04:30:00'
             },
             {
                 'Symbol': 'KEKW',

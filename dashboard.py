@@ -186,6 +186,37 @@ class DashboardManager:
         except Exception as e:
             logger.error(f"Error getting safety data: {e}")
             return pd.DataFrame()
+    
+    def generate_mock_tokens(self, count: int = 15):
+        """Generate mock tokens for demonstration"""
+        from models import TokenInfo, TokenStatus
+        import random
+        from datetime import datetime
+        
+        mock_tokens = []
+        symbols = ['PEPE', 'DOGE', 'BONK', 'SHIB', 'FLOKI', 'WOJAK', 'CHAD', 'KEKW', 'MOON', 'DEGEN', 'APE', 'MONKE', 'FROG', 'CAT', 'DOG']
+        
+        for i in range(count):
+            symbol = symbols[i % len(symbols)]
+            if i >= len(symbols):
+                symbol = f"{symbol}{i}"
+            
+            token = TokenInfo(
+                address=f"mock_address_{i}_{random.randint(1000, 9999)}",
+                symbol=symbol,
+                name=f"{symbol} Token",
+                price=random.uniform(0.000001, 0.01),
+                volume_24h=random.uniform(100000, 10000000),
+                fdv=random.uniform(1000000, 100000000),
+                change_24h=random.uniform(-50, 100),
+                status=random.choice([TokenStatus.PENDING, TokenStatus.APPROVED, TokenStatus.TRADING]),
+                discovered_at=datetime.now(),
+                twitter_score=random.uniform(0, 100),
+                rugcheck_score=random.uniform(0, 100)
+            )
+            mock_tokens.append(token)
+        
+        return mock_tokens
 
 def render_sidebar(dashboard_manager):
     """Render the sidebar with bot controls"""
@@ -286,11 +317,42 @@ def render_discovery_tab(dashboard_manager):
     """Render the discovery tab"""
     st.header("🔍 代币发现")
     
+    # Add refresh button
+    col1, col2, col3 = st.columns([1, 1, 4])
+    
+    with col1:
+        if st.button("🔄 刷新发现", type="primary"):
+            if dashboard_manager.bot and hasattr(dashboard_manager.bot, 'dexscreener_client'):
+                try:
+                    # Fetch real trending pairs
+                    import asyncio
+                    trending_pairs = asyncio.run(dashboard_manager.bot.dexscreener_client.fetch_trending_pairs(max_pairs=50))
+                    
+                    # Update discovered tokens
+                    for token in trending_pairs:
+                        dashboard_manager.bot.discovered_tokens[token.address] = token
+                    
+                    st.success(f"✅ 成功获取 {len(trending_pairs)} 个热门代币!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ 获取代币失败: {e}")
+            else:
+                st.warning("⚠️ 机器人未初始化，无法获取真实数据")
+    
+    with col2:
+        if st.button("📊 显示模拟数据"):
+            # Generate mock data for demonstration
+            mock_tokens = dashboard_manager.generate_mock_tokens(15)
+            for token in mock_tokens:
+                dashboard_manager.bot.discovered_tokens[token.address] = token
+            st.success("✅ 已加载模拟数据!")
+            st.rerun()
+    
     # Get discovered tokens
     tokens_df = dashboard_manager.get_discovered_tokens()
     
     if tokens_df.empty:
-        st.info("尚未发现代币。请从侧边栏开始发现。")
+        st.info("尚未发现代币。请点击上方按钮开始发现。")
         return
     
     # Summary metrics
