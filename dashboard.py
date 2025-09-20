@@ -122,12 +122,18 @@ with st.sidebar:
             col1, col2 = st.columns(2)
             with col1:
                 if st.button("🔍 开始发现"):
-                    asyncio.create_task(bot.start_discovery())
-                    st.success("发现功能已启动")
+                    try:
+                        asyncio.run(bot.start_discovery())
+                        st.success("发现功能已启动")
+                    except Exception as e:
+                        st.error(f"启动失败: {e}")
             with col2:
                 if st.button("⏹️ 停止发现"):
-                    asyncio.create_task(bot.stop_discovery())
-                    st.success("发现功能已停止")
+                    try:
+                        asyncio.run(bot.stop_discovery())
+                        st.success("发现功能已停止")
+                    except Exception as e:
+                        st.error(f"停止失败: {e}")
 
         # 显示机器人信息
         st.subheader("📊 机器人状态")
