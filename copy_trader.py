@@ -41,13 +41,32 @@ class CopyTrader:
             logger.error(f"私钥解析失败: {e}")
             raise
         
-        # 跟单配置
+        # 跟单配置 - 参考 OpenSolBot 的配置结构
         self.leader_wallets = config.leader_wallets if hasattr(config, 'leader_wallets') else []
         self.min_confidence_score = getattr(config, 'min_confidence_score', 70)
         self.copy_trading_enabled = getattr(config, 'copy_trading_enabled', True)
+        self.copy_ratio = getattr(config, 'copy_ratio', 1.0)
+        self.max_copy_amount = getattr(config, 'max_copy_amount', 1.0)
         
         # 交易历史
         self.trade_history = []
+        self.performance_stats = {
+            'total_trades': 0,
+            'successful_trades': 0,
+            'total_profit': 0.0,
+            'max_drawdown': 0.0,
+            'win_rate': 0.0
+        }
+        
+        # 风险控制
+        self.daily_loss_limit = getattr(config, 'max_daily_loss', 0.1)
+        self.daily_trades = 0
+        self.daily_pnl = 0.0
+        self.last_reset_date = datetime.now().date()
+        
+        # 跟单状态
+        self.is_running = False
+        self.subscriptions = {}
         self.load_trade_history()
         
         # 监控状态

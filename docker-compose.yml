@@ -1,0 +1,126 @@
+version: '3.8'
+
+services:
+  # MySQL 数据库
+  mysql:
+    image: mysql:8.0
+    container_name: solana_bot_mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: solana_trade_bot
+      MYSQL_USER: bot_user
+      MYSQL_PASSWORD: bot_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    restart: unless-stopped
+    networks:
+      - solana_bot_network
+
+  # Redis 缓存
+  redis:
+    image: redis:7-alpine
+    container_name: solana_bot_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - solana_bot_network
+
+  # 主应用
+  bot:
+    build: .
+    container_name: solana_bot_app
+    depends_on:
+      - mysql
+      - redis
+    environment:
+      # 数据库配置
+      MYSQL_URL: "mysql+pymysql://bot_user:bot_password@mysql:3306/solana_trade_bot"
+      REDIS_URL: "redis://redis:6379/0"
+      
+      # Solana 配置
+      SOLANA_RPC_URL: "https://api.mainnet-beta.solana.com"
+      SOLANA_WS_URL: "wss://api.mainnet-beta.solana.com"
+      
+      # API 配置
+      HELIUS_API_KEY: "${HELIUS_API_KEY}"
+      SHYFT_API_KEY: "${SHYFT_API_KEY}"
+      JUPITER_API_KEY: "${JUPITER_API_KEY}"
+      RAYDIUM_API_KEY: "${RAYDIUM_API_KEY}"
+      
+      # Telegram 配置
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN}"
+      TELEGRAM_CHAT_ID: "${TELEGRAM_CHAT_ID}"
+      
+      # 跟单配置
+      COPY_TRADING_ENABLED: "true"
+      LEADER_WALLET_ADDRESS: "${LEADER_WALLET_ADDRESS}"
+      COPY_RATIO: "1.0"
+      MIN_CONFIDENCE_SCORE: "70"
+      
+      # 交易配置
+      MAX_POSITION_SIZE: "0.1"
+      MIN_VOLUME_24H: "1000000"
+      MIN_FDV: "100000"
+      MAX_SLIPPAGE: "0.05"
+      DEFAULT_SLIPPAGE: "0.01"
+      
+      # 日志配置
+      LOG_LEVEL: "INFO"
+      LOG_TO_FILE: "true"
+    volumes:
+      - ./config.toml:/app/config.toml
+      - ./logs:/app/logs
+      - bot_data:/app/data
+    restart: unless-stopped
+    networks:
+      - solana_bot_network
+    command: python3 run_enhanced_bot_v2.py
+
+  # 监控面板
+  dashboard:
+    build: .
+    container_name: solana_bot_dashboard
+    ports:
+      - "8501:8501"
+    environment:
+      - STREAMLIT_SERVER_PORT=8501
+      - STREAMLIT_SERVER_ADDRESS=0.0.0.0
+    volumes:
+      - ./dashboard_visual.py:/app/dashboard_visual.py
+      - ./config.toml:/app/config.toml
+    restart: unless-stopped
+    networks:
+      - solana_bot_network
+    command: streamlit run dashboard_visual.py --server.port 8501 --server.address 0.0.0.0
+
+  # 配置界面
+  config_ui:
+    build: .
+    container_name: solana_bot_config
+    ports:
+      - "8502:8502"
+    environment:
+      - STREAMLIT_SERVER_PORT=8502
+      - STREAMLIT_SERVER_ADDRESS=0.0.0.0
+    volumes:
+      - ./config_ui.py:/app/config_ui.py
+      - ./config.toml:/app/config.toml
+    restart: unless-stopped
+    networks:
+      - solana_bot_network
+    command: streamlit run config_ui.py --server.port 8502 --server.address 0.0.0.0
+
+volumes:
+  mysql_data:
+  redis_data:
+  bot_data:
+
+networks:
+  solana_bot_network:
+    driver: bridge

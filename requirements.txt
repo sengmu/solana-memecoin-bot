@@ -22,5 +22,24 @@ asyncio-mqtt>=0.16.0
 pydantic>=2.0.0
 httpx>=0.28.0
 
+# 配置管理
+toml>=0.10.2
+
+# WebSocket 支持
+websockets>=11.0.3
+
+# 数据库支持
+pymysql>=1.1.0
+redis>=5.0.0
+sqlalchemy>=2.0.0
+
+# 监控和日志
+prometheus-client>=0.19.0
+structlog>=23.0.0
+
+# 测试
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+
 # 可选依赖
 # selenium>=4.35.0  # 可能在某些部署环境中造成问题
