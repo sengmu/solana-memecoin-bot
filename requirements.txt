@@ -1,12 +1,19 @@
-solana==0.36.9
-solders==0.26.0
-requests==2.32.5
-beautifulsoup4==4.13.5
-websockets==15.0.1
-selenium==4.35.0
-python-dotenv==1.1.1
-streamlit==1.49.1
-plotly==6.3.0
-pandas==2.3.2
-aiohttp>=3.9.5
+# Core dependencies for Streamlit Community Cloud
+streamlit>=1.49.0
+pandas>=2.3.0
+plotly>=6.3.0
+requests>=2.32.0
+python-dotenv>=1.1.0
+
+# Solana dependencies
+solana>=0.36.0
+solders>=0.26.0
 base58>=2.1.0
+
+# Web dependencies
+aiohttp>=3.9.0
+websockets>=15.0.0
+beautifulsoup4>=4.13.0
+
+# Optional: Selenium (may cause issues in cloud deployment)
+# selenium>=4.35.0
