@@ -49,6 +49,7 @@ class MemecoinBot:
         self.trading_stats = TradingStats()
         self.discovered_tokens: Dict[str, TokenInfo] = {}
         self.active_positions: Dict[str, TokenInfo] = {}
+        self.positions = {}  # 添加 positions 属性
         
         # Load existing stats
         self.trading_stats = self.logger.load_trading_stats()
@@ -134,6 +135,18 @@ class MemecoinBot:
         except Exception as e:
             self.logger.log_error(e, "Bot shutdown")
             
+    def start_discovery(self):
+        """Start the discovery process."""
+        self.running = True
+        self.logger.log_info("Discovery started")
+        return True
+    
+    def stop_discovery(self):
+        """Stop the discovery process."""
+        self.running = False
+        self.logger.log_info("Discovery stopped")
+        return True
+
     async def run_bot(self):
         """Main bot execution loop."""
         try:

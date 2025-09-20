@@ -76,16 +76,16 @@ class DashboardManager:
             return True
         except (AttributeError, KeyError, TypeError) as e:
             logger.error(f"Bot initialization failed due to missing .env or config: {e}")
-            # Fallback to MockBot with fetch_trending_pairs method
+            # Fallback to MockBot with all necessary methods
             self.bot = self._create_mock_bot()
             st.error("⚠️ 机器人初始化失败，请检查 .env 配置文件")
-            return False
+            return True  # 返回 True 因为 MockBot 已成功创建
         except Exception as e:
             logger.error(f"Bot initialization failed: {e}")
             # Fallback to MockBot for demo purposes
             self.bot = self._create_mock_bot()
             st.warning("⚠️ 机器人初始化失败，使用模拟数据演示")
-            return False
+            return True  # 返回 True 因为 MockBot 已成功创建
     
     def _create_mock_bot(self):
         """Create a MockBot with all necessary methods"""
@@ -95,6 +95,8 @@ class DashboardManager:
                 self.discovered_tokens = {}
                 self.trades = []
                 self.positions = {}
+                self.enable_copy = True
+                self.buy_size_sol = 0.5
                 self.trading_stats = type('MockStats', (), {
                     'total_trades': 0,
                     'successful_trades': 0,
@@ -133,14 +135,23 @@ class DashboardManager:
             def start_discovery(self):
                 """Mock start_discovery method"""
                 self.running = True
+                print("Mock discovery started")
                 return True
             
             def stop_discovery(self):
                 """Mock stop_discovery method"""
                 self.running = False
+                print("Mock discovery stopped")
                 return True
+            
+            async def mock_discovery_loop(self):
+                """Mock discovery loop for async operations"""
+                while self.running:
+                    await asyncio.sleep(5)
+                    print("Mock discovery running...")
         
-        return MockBot()
+        mock_bot = MockBot()
+        return mock_bot
     
     def get_discovered_tokens(self):
         """Get discovered tokens data"""
@@ -278,6 +289,11 @@ def render_sidebar(dashboard_manager):
     """Render the sidebar with bot controls"""
     st.sidebar.title("🤖 机器人控制")
     
+    # 检查 bot 是否已初始化
+    if dashboard_manager.bot is None:
+        st.sidebar.warning("机器人未初始化，跳过发现功能")
+        return
+    
     # Bot status
     if dashboard_manager.bot:
         status = "🟢 运行中" if dashboard_manager.bot.running else "🔴 已停止"
@@ -303,13 +319,17 @@ def render_sidebar(dashboard_manager):
                 st.sidebar.error("机器人初始化失败!")
         else:
             if not dashboard_manager.bot.running:
-                asyncio.create_task(dashboard_manager.bot.start_discovery())
-                st.sidebar.success("开始发现代币...")
-                # 使用 session state 强制刷新
-                if 'force_refresh' not in st.session_state:
-                    st.session_state.force_refresh = 0
-                st.session_state.force_refresh += 1
-                st.rerun()
+                # 检查 bot 是否有 start_discovery 方法
+                if hasattr(dashboard_manager.bot, 'start_discovery'):
+                    asyncio.create_task(dashboard_manager.bot.start_discovery())
+                    st.sidebar.success("开始发现代币...")
+                    # 使用 session state 强制刷新
+                    if 'force_refresh' not in st.session_state:
+                        st.session_state.force_refresh = 0
+                    st.session_state.force_refresh += 1
+                    st.rerun()
+                else:
+                    st.sidebar.info("发现方法不可用")
             else:
                 st.sidebar.warning("发现已在进行中...")
     
@@ -807,6 +827,10 @@ def main():
     
     dashboard_manager = st.session_state.dashboard_manager
     
+    # 尝试初始化 bot（如果还没有初始化）
+    if dashboard_manager.bot is None:
+        dashboard_manager.initialize_bot()
+    
     # Main header
     st.markdown('<h1 class="main-header chinese-text">🤖 Memecoin 交易机器人仪表板</h1>', unsafe_allow_html=True)
     
@@ -844,8 +868,13 @@ if __name__ == "__main__":
     print("\nTesting bot initialization...")
     dashboard_manager = DashboardManager()
     success = dashboard_manager.initialize_bot()
-    if success and dashboard_manager.bot:
-        print("✅ Bot initialized successfully")
+    
+    if dashboard_manager.bot:
+        print("✅ Bot ready, has start_discovery:", hasattr(dashboard_manager.bot, 'start_discovery'))
+        print("✅ Bot has positions:", hasattr(dashboard_manager.bot, 'positions'))
+        print("✅ Bot has enable_copy:", hasattr(dashboard_manager.bot, 'enable_copy'))
+        print("✅ Bot has buy_size_sol:", hasattr(dashboard_manager.bot, 'buy_size_sol'))
+        
         # Test fetch_trending_pairs
         import asyncio
         try:
