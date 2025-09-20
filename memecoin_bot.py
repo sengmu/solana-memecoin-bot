@@ -19,7 +19,7 @@ from dexscreener_client import DexScreenerClient
 from twitter_analyzer import TwitterAnalyzer
 from rugcheck_analyzer import RugCheckAnalyzer
 from jupiter_trader import JupiterTrader
-from copy_trader import CopyTrader, LeaderTrade
+from copy_trader import CopyTrader
 from wallet_monitor import WalletMonitor
 from logger import setup_bot_logging, TradeLogger, ErrorHandler
 
@@ -31,7 +31,7 @@ class MemecoinBot:
         """Initialize the memecoin trading bot."""
         # Load configuration
         load_dotenv(config_path)
-        self.config = BotConfig.from_env()
+        self.config = BotConfig()
         
         # Setup logging and error handling
         self.logger, self.error_handler = setup_bot_logging(self.config)
@@ -333,7 +333,7 @@ class MemecoinBot:
         except Exception as e:
             self.logger.log_error(e, f"Trading consideration for {token.symbol}")
             
-    async def _on_leader_trade_detected(self, leader_trade: LeaderTrade):
+    async def _on_leader_trade_detected(self, leader_trade):
         """Handle detected leader trade for copy trading."""
         try:
             self.logger.log_info(

@@ -71,25 +71,25 @@ class DashboardManager:
     def initialize_bot(self):
         """Initialize the bot with environment variables"""
         try:
-            # Try to load from environment first
-            try:
-                config = BotConfig.from_env()
-            except Exception as env_error:
-                logger.warning(f"Environment config failed: {env_error}")
-                # Fallback to default config for demo
-                config = BotConfig(
-                    min_volume_24h=1000000,  # $1M
-                    min_fdv=100000,          # $100K
-                    max_position_size=0.1,   # 0.1 SOL
-                    max_slippage=0.05,       # 5%
-                    default_slippage=0.01,   # 1%
-                    meme_keywords=['meme', 'pepe', 'doge', 'shib', 'floki', 'bonk', 'wojak', 'chad', 'kekw', 'moon', 'degen']
-                )
-            
-            self.bot = MemecoinBot(config)
+            # Try to initialize bot with new BotConfig
+            self.bot = MemecoinBot()
             return True
         except Exception as e:
             logger.error(f"Bot initialization failed: {e}")
+            # Fallback to MockBot for demo purposes
+            self.bot = type('MockBot', (), {
+                'running': False,
+                'discovered_tokens': {},
+                'trades': [],
+                'positions': {},
+                'trading_stats': type('MockStats', (), {
+                    'total_trades': 0,
+                    'successful_trades': 0,
+                    'total_volume': 0.0,
+                    'total_pnl': 0.0
+                })()
+            })()
+            st.warning("⚠️ 机器人初始化失败，使用模拟数据演示")
             return False
     
     def get_discovered_tokens(self):
@@ -685,4 +685,5 @@ def main():
         render_safety_tab(dashboard_manager)
 
 if __name__ == "__main__":
+    print("Dashboard fixed, run streamlit run dashboard.py")
     main()

@@ -7,6 +7,7 @@ from typing import Optional, Dict, List, Any
 from datetime import datetime
 from enum import Enum
 import json
+import os
 
 
 class TradeType(Enum):
@@ -148,33 +149,33 @@ class RugCheckResult:
 class BotConfig:
     """Bot configuration settings."""
     # Solana Configuration
-    solana_rpc_url: str
-    solana_ws_url: str
-    private_key: str
+    solana_rpc_url: str = field(default_factory=lambda: os.getenv('RPC_URL', 'https://api.mainnet-beta.solana.com'))
+    solana_ws_url: str = field(default_factory=lambda: os.getenv('WS_URL', 'wss://api.mainnet-beta.solana.com'))
+    private_key: str = field(default_factory=lambda: os.getenv('WALLET_KEY_BASE58', ''))
     
     # Trading Configuration
-    max_position_size: float
-    min_volume_24h: float
-    min_fdv: float
-    max_slippage: float
-    default_slippage: float
+    max_position_size: float = field(default_factory=lambda: float(os.getenv('MAX_POSITION_SIZE', '1.0')))
+    min_volume_24h: float = field(default_factory=lambda: float(os.getenv('MIN_VOLUME_24H', '1000000')))
+    min_fdv: float = field(default_factory=lambda: float(os.getenv('MIN_FDV', '100000')))
+    max_slippage: float = field(default_factory=lambda: float(os.getenv('MAX_SLIPPAGE', '1000')))
+    default_slippage: float = field(default_factory=lambda: float(os.getenv('DEFAULT_SLIPPAGE', '500')))
     
     # Twitter Configuration
-    twitter_bearer_token: str
+    twitter_bearer_token: str = field(default_factory=lambda: os.getenv('TWITTER_BEARER_TOKEN', ''))
     
     # Copy Trading
-    leader_wallet_address: str
-    copy_trading_enabled: bool
-    min_confidence_score: float
+    leader_wallet_address: str = field(default_factory=lambda: os.getenv('LEADER_WALLET_ADDRESS', ''))
+    copy_trading_enabled: bool = field(default_factory=lambda: os.getenv('COPY_TRADING_ENABLED', 'true').lower() == 'true')
+    min_confidence_score: float = field(default_factory=lambda: float(os.getenv('MIN_CONFIDENCE_SCORE', '0.7')))
     
     # Logging
-    log_level: str
-    log_to_file: bool
+    log_level: str = field(default_factory=lambda: os.getenv('LOG_LEVEL', 'INFO'))
+    log_to_file: bool = field(default_factory=lambda: os.getenv('LOG_TO_FILE', 'false').lower() == 'true')
     
     # Risk Management
-    max_daily_loss: float
-    stop_loss_percentage: float
-    take_profit_percentage: float
+    max_daily_loss: float = field(default_factory=lambda: float(os.getenv('MAX_DAILY_LOSS', '100.0')))
+    stop_loss_percentage: float = field(default_factory=lambda: float(os.getenv('STOP_LOSS_PERCENTAGE', '20.0')))
+    take_profit_percentage: float = field(default_factory=lambda: float(os.getenv('TAKE_PROFIT_PERCENTAGE', '100.0')))
     
     # OpenSolBot 增强配置
     leader_wallets: List[str] = field(default_factory=list)
