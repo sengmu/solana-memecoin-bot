@@ -1,15 +1,18 @@
+#!/usr/bin/env python3
 """
-Streamlit Community Cloud entry point for the Memecoin Trading Bot Dashboard
+Streamlit Community Cloud 部署入口
 """
 
+import streamlit as st
 import sys
 import os
+from pathlib import Path
 
-# Add the current directory to Python path
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# 添加项目根目录到路径
+sys.path.append(str(Path(__file__).parent))
 
-# Import and run the cloud dashboard
-from dashboard_cloud import main
+# 导入主应用
+from dashboard_visual import main
 
 if __name__ == "__main__":
     main()

@@ -101,6 +101,21 @@ init:
 	fi
 	@echo "📝 请编辑 config.toml 和 .env 文件配置您的参数"
 
+# 部署管理
+deploy:
+	@echo "🚀 部署到 Streamlit Community Cloud..."
+	./deploy.sh
+
+push:
+	@echo "📤 推送代码到 GitHub..."
+	git add .
+	git commit -m "Auto-commit: $(date '+%Y-%m-%d %H:%M:%S')"
+	git push origin main
+
+git-status:
+	@echo "📊 Git 状态:"
+	git status
+
 # 数据库管理
 db-init:
 	@echo "🗄️  初始化数据库..."
