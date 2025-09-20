@@ -8,6 +8,7 @@ import asyncio
 import logging
 import json
 import time
+import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Callable
 import aiohttp
@@ -193,7 +194,7 @@ class CopyTrader:
                 # 等待一段时间再检查
                 await asyncio.sleep(5)
             
-        except Exception as e:
+            except Exception as e:
                 logger.error(f"监控钱包交易失败: {e}")
                 await asyncio.sleep(10)
     
@@ -343,7 +344,7 @@ class CopyTradingManager:
     def add_copy_trader(self, name: str, private_key: str, rpc_url: str):
         """添加跟单交易者"""
         try:
-            copy_trader = CopyTrader(config, private_key, rpc_url)
+            copy_trader = CopyTrader(self.config, private_key, rpc_url)
             self.copy_traders[name] = copy_trader
             logger.info(f"添加跟单交易者: {name}")
             return True

@@ -398,6 +398,7 @@ async def main():
     manager = GeyserManager(config)
     
     # 添加客户端
+    import os
     rpc_url = os.getenv('SOLANA_RPC_URL')
     if rpc_url:
         manager.add_geyser_client('main_client', rpc_url)

@@ -322,9 +322,11 @@ async def init_telegram_bot(trading_bot=None):
 
 async def cleanup_telegram_bot():
     """清理 Telegram Bot"""
-    global telegram_bot
-    if telegram_bot:
-        await telegram_bot.stop_bot()
+    try:
+        if 'telegram_bot' in globals() and telegram_bot:
+            await telegram_bot.stop_bot()
+    except NameError:
+        pass  # telegram_bot not defined
 
 def get_telegram_bot():
     """获取 Telegram Bot 实例"""
