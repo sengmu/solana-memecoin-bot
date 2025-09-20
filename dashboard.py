@@ -207,14 +207,22 @@ def render_sidebar(dashboard_manager):
         if not dashboard_manager.bot:
             if dashboard_manager.initialize_bot():
                 st.sidebar.success("机器人初始化成功!")
-                st.rerun()  # 重新运行以更新状态
+                # 使用 session state 强制刷新
+                if 'force_refresh' not in st.session_state:
+                    st.session_state.force_refresh = 0
+                st.session_state.force_refresh += 1
+                st.rerun()
             else:
                 st.sidebar.error("机器人初始化失败!")
         else:
             if not dashboard_manager.bot.running:
                 asyncio.create_task(dashboard_manager.bot.start_discovery())
                 st.sidebar.success("开始发现代币...")
-                st.rerun()  # 重新运行以更新状态
+                # 使用 session state 强制刷新
+                if 'force_refresh' not in st.session_state:
+                    st.session_state.force_refresh = 0
+                st.session_state.force_refresh += 1
+                st.rerun()
             else:
                 st.sidebar.warning("发现已在进行中...")
     
@@ -222,7 +230,11 @@ def render_sidebar(dashboard_manager):
         if dashboard_manager.bot and dashboard_manager.bot.running:
             dashboard_manager.bot.stop_discovery()
             st.sidebar.success("已停止发现...")
-            st.rerun()  # 重新运行以更新状态
+            # 使用 session state 强制刷新
+            if 'force_refresh' not in st.session_state:
+                st.session_state.force_refresh = 0
+            st.session_state.force_refresh += 1
+            st.rerun()
         else:
             st.sidebar.warning("没有正在运行的发现任务...")
     
