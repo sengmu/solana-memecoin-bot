@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import websockets
+import requests
 from typing import Callable, Optional, Dict, Any, List
 from datetime import datetime
 import re
@@ -227,3 +228,166 @@ class DexScreenerClient:
         except Exception as e:
             self.logger.error(f"Error fetching trending tokens: {e}")
             return []
+
+    async def fetch_trending_pairs(self, max_pairs: int = 200, timeout: int = 10) -> List[TokenInfo]:
+        """
+        Fetch trending pairs from DexScreener with WebSocket fallback to REST API.
+        
+        Args:
+            max_pairs: Maximum number of pairs to fetch
+            timeout: Timeout in seconds
+            
+        Returns:
+            List of TokenInfo objects for trending pairs
+        """
+        logger = logging.getLogger(__name__)
+        
+        # Headers to bypass Cloudflare protection
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Origin': 'https://dexscreener.com',
+            'Referer': 'https://dexscreener.com/',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-origin'
+        }
+        
+        # Try WebSocket first with retries
+        for attempt in range(3):
+            try:
+                logger.info(f"Attempting WebSocket connection (attempt {attempt + 1}/3)")
+                
+                ws_url = "wss://io.dexscreener.com/dex/screener/pairs/h24/1?rankBy[key]=trendingScoreH6&rankBy[order]=desc&filters[chainIds][0]=solana"
+                
+                async with websockets.connect(
+                    ws_url,
+                    extra_headers=headers,
+                    ping_interval=20,
+                    ping_timeout=10,
+                    close_timeout=10
+                ) as websocket:
+                    logger.info("WebSocket connected successfully")
+                    
+                    # Set timeout for receiving data
+                    pairs_received = []
+                    start_time = asyncio.get_event_loop().time()
+                    
+                    try:
+                        async for message in websocket:
+                            if asyncio.get_event_loop().time() - start_time > timeout:
+                                logger.warning("WebSocket timeout reached")
+                                break
+                                
+                            try:
+                                data = json.loads(message)
+                                if 'pairs' in data and data['pairs']:
+                                    for pair_data in data['pairs']:
+                                        token_info = await self._parse_pair_data(pair_data)
+                                        if token_info and self._is_valid_memecoin(token_info):
+                                            pairs_received.append(token_info)
+                                            if len(pairs_received) >= max_pairs:
+                                                logger.info(f"WebSocket: Received {len(pairs_received)} pairs")
+                                                return pairs_received[:max_pairs]
+                                                
+                            except json.JSONDecodeError as e:
+                                logger.warning(f"WebSocket JSON decode error: {e}")
+                                continue
+                            except Exception as e:
+                                logger.warning(f"WebSocket message processing error: {e}")
+                                continue
+                                
+                    except asyncio.TimeoutError:
+                        logger.warning("WebSocket operation timed out")
+                        
+                    if pairs_received:
+                        logger.info(f"WebSocket: Received {len(pairs_received)} pairs before timeout")
+                        return pairs_received[:max_pairs]
+                        
+            except websockets.exceptions.InvalidStatusCode as e:
+                logger.warning(f"WebSocket invalid status code: {e}")
+            except websockets.exceptions.ConnectionClosed as e:
+                logger.warning(f"WebSocket connection closed: {e}")
+            except Exception as e:
+                logger.warning(f"WebSocket error (attempt {attempt + 1}): {e}")
+                
+            # Wait before retry
+            if attempt < 2:
+                await asyncio.sleep(2)
+                
+        # Fallback to REST API
+        logger.info("WebSocket failed, trying REST API fallback")
+        try:
+            rest_url = "https://api.dexscreener.com/latest/dex/pairs/solana"
+            params = {
+                'rankBy': 'trendingScore',
+                'order': 'desc',
+                'limit': max_pairs
+            }
+            
+            response = requests.get(rest_url, params=params, headers=headers, timeout=timeout)
+            
+            if response.status_code == 200:
+                data = response.json()
+                pairs_received = []
+                
+                for pair_data in data.get('pairs', []):
+                    token_info = await self._parse_pair_data(pair_data)
+                    if token_info and self._is_valid_memecoin(token_info):
+                        pairs_received.append(token_info)
+                        if len(pairs_received) >= max_pairs:
+                            break
+                            
+                logger.info(f"REST API: Received {len(pairs_received)} pairs")
+                return pairs_received[:max_pairs]
+            else:
+                logger.error(f"REST API failed with status: {response.status_code}")
+                
+        except requests.exceptions.Timeout:
+            logger.error("REST API request timed out")
+        except requests.exceptions.RequestException as e:
+            logger.error(f"REST API request error: {e}")
+        except Exception as e:
+            logger.error(f"REST API error: {e}")
+            
+        # If both methods fail
+        logger.error("Both WebSocket and REST API failed to fetch trending pairs")
+        return []
+
+
+# Test function
+async def test_fetch_trending_pairs():
+    """Test the fetch_trending_pairs function."""
+    import logging
+    
+    # Setup basic logging
+    logging.basicConfig(level=logging.INFO)
+    
+    # Create a mock config
+    from models import BotConfig
+    config = BotConfig(
+        min_volume_24h=1000000,  # $1M
+        min_fdv=100000,          # $100K
+        meme_keywords=['meme', 'pepe', 'doge', 'shib', 'floki', 'bonk', 'wojak', 'chad', 'kekw', 'moon', 'degen']
+    )
+    
+    # Create client instance
+    client = DexScreenerClient(config, lambda x: None)  # No callback needed for test
+    
+    # Test the function
+    print("Testing fetch_trending_pairs...")
+    result = await client.fetch_trending_pairs(max_pairs=200, timeout=10)
+    print(f"Result: {len(result)} pairs found")
+    
+    # Print first few results
+    for i, token in enumerate(result[:5]):
+        print(f"{i+1}. {token.symbol} ({token.name}) - Volume: ${token.volume_24h:,.0f}, FDV: ${token.fdv:,.0f}")
+    
+    return result
+
+
+if __name__ == "__main__":
+    asyncio.run(test_fetch_trending_pairs())
