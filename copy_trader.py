@@ -193,7 +193,7 @@ class CopyTrader:
                 # 等待一段时间再检查
                 await asyncio.sleep(5)
             
-            except Exception as e:
+        except Exception as e:
                 logger.error(f"监控钱包交易失败: {e}")
                 await asyncio.sleep(10)
     

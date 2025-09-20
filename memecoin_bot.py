@@ -1,688 +1,796 @@
-"""
-Main Solana memecoin trading bot class.
-"""
-
 import asyncio
+import json
 import os
 import logging
-from typing import Optional, Dict, Any, List
-from datetime import datetime, timedelta
-from pathlib import Path
+import time
+from datetime import datetime
+from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
-
+import base58
+import requests
+from bs4 import BeautifulSoup
+import re
+from solana.rpc.async_api import AsyncClient
+from solana.rpc.commitment import Confirmed
+from solders.keypair import Keypair
+from solders.pubkey import Pubkey as PublicKey
+from solders.transaction import Transaction
+from solders.pubkey import Pubkey
+from solders.signature import Signature
+from solders.compute_budget import set_compute_unit_limit, set_compute_unit_price
+import websockets
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from dotenv import load_dotenv
 
-from models import (
-    BotConfig, TokenInfo, Trade, TradeType, TokenStatus, 
-    TradingStats, WalletToken, PortfolioSnapshot
-)
-from dexscreener_client import DexScreenerClient
-from twitter_analyzer import TwitterAnalyzer
-from rugcheck_analyzer import RugCheckAnalyzer
-from jupiter_trader import JupiterTrader
-from copy_trader import CopyTrader
-from wallet_monitor import WalletMonitor
-from logger import setup_bot_logging, TradeLogger, ErrorHandler
+# Load .env
+load_dotenv()
 
+# Logging setup
+logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(asctime)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Constants
+JUPITER_QUOTE_API = "https://quote-api.jup.ag/v6/quote"
+JUPITER_SWAP_API = "https://quote-api.jup.ag/v6/swap"
+SOL_MINT = "So11111111111111111111111111111111111111112"
+RUGCHECK_BASE_URL = "https://rugcheck.xyz/tokens/"
+
+@dataclass
+class BotConfig:
+    """Configuration for the bot, loaded from .env with defaults."""
+    solana_rpc_url: str = os.getenv('RPC_URL', 'https://api.mainnet-beta.solana.com')
+    solana_ws_url: str = os.getenv('WS_URL', 'wss://api.mainnet-beta.solana.com')
+    private_key: str = os.getenv('WALLET_KEY_BASE58', '')
+    max_position_size: float = float(os.getenv('MAX_POSITION_SIZE', 1.0))
+    max_slippage: int = int(float(os.getenv('MAX_SLIPPAGE', '1000')) * 10000)  # Convert to basis points
+    default_slippage: int = int(float(os.getenv('DEFAULT_SLIPPAGE', '500')) * 10000)  # Convert to basis points
+    twitter_bearer_token: str = os.getenv('TWITTER_BEARER_TOKEN', '')
+    leader_wallet_address: str = os.getenv('LEADER_WALLET', '')
+    copy_trading_enabled: bool = os.getenv('COPY_TRADING_ENABLED', 'True').lower() == 'true'
+    min_confidence_score: float = float(os.getenv('MIN_CONFIDENCE_SCORE', 0.7))
+    log_level: str = os.getenv('LOG_LEVEL', 'INFO')
+    log_to_file: bool = os.getenv('LOG_TO_FILE', 'False').lower() == 'true'
+    max_daily_loss: float = float(os.getenv('MAX_DAILY_LOSS', '100.0'))
+    stop_loss_percentage: float = float(os.getenv('STOP_LOSS_PERCENTAGE', '20.0'))
+    take_profit_percentage: float = float(os.getenv('TAKE_PROFIT_PERCENTAGE', '100.0'))
+
+@dataclass
+class TradeConfig:
+    wallet_keypair: Keypair
+    rpc_endpoint: str
+    priority_fee_lamports: int = 10000
+    slippage_bps: int = 500
+    buy_size_sol: float = 0.5
+    sell_percentage: float = 100.0
+
+@dataclass
+class CopyTradeConfig(TradeConfig):
+    leader_wallet: str = ""
+    copy_buy_size_sol: float = 0.2
+    min_confidence: float = 0.7
 
 @dataclass
 class MemecoinData:
-    """Data structure for memecoin information."""
     symbol: str
     name: str
     address: str
-    price: float
-    volume_24h: float
-    price_change_24h: float
     fdv: float
-    social_engagement: int = 0
+    volume_24h: float
+    social_engagement: int
+    twitter_handle: Optional[str]
+    pair_address: str
+    price_usd: float
+    price_change_24h: float
 
+@dataclass
+class TwitterAccountQuality:
+    handle: str
+    name: str
+    bio: str
+    followers: int
+    following: int
+    tweets_count: int
+    verified: bool
+    joined_date: str
+    location: Optional[str]
+    recent_tweets: List[Dict[str, Any]]
+    avg_likes: float
+    avg_retweets: float
+    avg_replies: float
+    engagement_rate: float
+    follower_ratio: float
+    quality_score: float
+
+@dataclass
+class RugCheckResult:
+    rating: Optional[str]
+    warnings: List[str]
+    top_holders: List[Dict[str, float]]
+    has_large_whale: bool
+    liquidity: Optional[float]
+    market_cap: Optional[float]
+    other_metrics: Dict[str, Any]
 
 def parse_number(text: str) -> float:
-    """Parse number strings like '1.2M', '$1,000,000', '500K' to float with regex"""
-    if not text or text == '':
+    """Parse abbreviated numbers like '1.2M', '$1,000,000', '10%' to float."""
+    if not text:
         return 0.0
-    
-    # Convert to string if not already
-    text = str(text)
-    
-    # Use regex to clean the text - keep only digits, dots, K, M, B, $, %
-    import re
-    text = re.sub(r'[^\d. KM B$%]', '', text.upper())
-    
-    # Remove % if present
+    text = re.sub(r'[^\d. KM B$%]', '', str(text).upper())
+    if not text:
+        return 0.0
+    text = text.replace('$', '')
     if '%' in text:
         text = text.replace('%', '')
-    
-    # Remove $ and commas
-    text = text.replace('$', '').replace(',', '').strip()
-    
-    if not text or text == '0':
-        return 0.0
-    
-    try:
-        if 'K' in text:
-            return float(re.sub(r'K', '', text)) * 1000
-        elif 'M' in text:
-            return float(re.sub(r'M', '', text)) * 1000000
-        elif 'B' in text:
-            return float(re.sub(r'B', '', text)) * 1000000000
-        else:
+    if 'K' in text:
+        cleaned = re.sub(r'K', '', text)
+        try:
+            return float(cleaned) * 1000
+        except ValueError:
+            return 0.0
+    if 'M' in text:
+        cleaned = re.sub(r'M', '', text)
+        try:
+            return float(cleaned) * 1000000
+        except ValueError:
+            return 0.0
+    if 'B' in text:
+        cleaned = re.sub(r'B', '', text)
+        try:
+            return float(cleaned) * 1000000000
+        except ValueError:
+            return 0.0
+    else:
+        try:
             return float(text)
-    except (ValueError, TypeError):
-        return 0.0
-
-
-def extract_memecoins(pairs: List[Dict[str, Any]]) -> List[MemecoinData]:
-    """Extract memecoin data from DexScreener pairs."""
-    memecoins = []
-    
-    for pair in pairs:
-        if 'baseToken' not in pair:
-            continue
-            
-        try:
-            # Parse string numbers to floats using parse_number
-            volume_24h = parse_number(str(pair.get('volume', {}).get('h24', '0')))
-            fdv = parse_number(str(pair.get('fdv', '0')))
-            price_change_24h = parse_number(str(pair.get('priceChange', {}).get('h24', '0')))
-            price = parse_number(str(pair.get('priceUsd', '0')))
-            
-            # Handle social engagement - use placeholder if not available
-            socials = pair.get('socials', [])
-            social_engagement = 10000  # Placeholder value
-            if socials and len(socials) > 0:
-                social_engagement = int(socials[0].get('followers', 10000))
-            
-            memecoin = MemecoinData(
-                symbol=pair['baseToken'].get('symbol', 'UNKNOWN'),
-                name=pair['baseToken'].get('name', 'Unknown Token'),
-                address=pair['baseToken'].get('address', 'unknown'),
-                price=price,
-                volume_24h=volume_24h,
-                price_change_24h=price_change_24h,
-                fdv=fdv,
-                social_engagement=social_engagement
-            )
-            memecoins.append(memecoin)
-            
-        except (ValueError, TypeError, KeyError) as e:
-            logging.warning(f"Error extracting memecoin data from pair: {e}")
-            continue
-    
-    return memecoins
-
-
-def filter_and_sort_memecoins(
-    memecoins: List[MemecoinData], 
-    min_volume: float = 0, 
-    min_fdv: float = 0, 
-    min_engagement: int = 0
-) -> List[MemecoinData]:
-    """Filter and sort memecoins with safe comparisons using parse_number."""
-    if not memecoins:
-        return []
-    
-    # Use list comprehension with parse_number for safe filtering
-    filtered = [
-        m for m in memecoins 
-        if parse_number(str(m.volume_24h)) >= min_volume 
-        and parse_number(str(m.fdv)) >= min_fdv 
-        and m.social_engagement >= min_engagement
-    ]
-    
-    # Sort by volume (descending) using parse_number
-    return sorted(filtered, key=lambda x: parse_number(str(x.volume_24h)), reverse=True)
-
-
-# Test function
-def test_extract_memecoins():
-    """Test extract_memecoins with sample data"""
-    test_pairs = [
-        {
-            "baseToken": {"name": "Test Token", "symbol": "TEST", "address": "test123"},
-            "volume": {"h24": "1.2M"},
-            "fdv": "$1,000,000",
-            "priceChange": {"h24": 10},
-            "priceUsd": 0.001,
-            "socials": [{"followers": 5000}]
-        },
-        {
-            "baseToken": {"name": "Another Token", "symbol": "ANOTHER", "address": "test456"},
-            "volume": {"h24": "500K"},
-            "fdv": "$2,500,000",
-            "priceChange": {"h24": -5},
-            "priceUsd": 0.002,
-            "socials": [{"followers": 2000}]
-        }
-    ]
-    
-    result = extract_memecoins(test_pairs)
-    print(f"✅ extract_memecoins returned {len(result)} memecoins")
-    for memecoin in result:
-        print(f"  - {memecoin.symbol}: volume={memecoin.volume_24h}, fdv={memecoin.fdv}, social={memecoin.social_engagement}")
-    return result
-
-
-class MemecoinBot:
-    """Main memecoin trading bot class."""
-    
-    def __init__(self, config_path: str = ".env"):
-        """Initialize the memecoin trading bot."""
-        # Load configuration
-        load_dotenv(config_path)
-        self.config = BotConfig()
-        
-        # Setup logging and error handling
-        self.logger, self.error_handler = setup_bot_logging(self.config)
-        
-        # Initialize components
-        self.jupiter_trader: Optional[JupiterTrader] = None
-        self.dexscreener_client: Optional[DexScreenerClient] = None
-        self.twitter_analyzer: Optional[TwitterAnalyzer] = None
-        self.rugcheck_analyzer: Optional[RugCheckAnalyzer] = None
-        self.copy_trader: Optional[CopyTrader] = None
-        self.wallet_monitor: Optional[WalletMonitor] = None
-        
-        # Bot state
-        self.running = False
-        self.trading_stats = TradingStats()
-        self.discovered_tokens: Dict[str, TokenInfo] = {}
-        self.active_positions: Dict[str, TokenInfo] = {}
-        self.positions = {}  # 添加 positions 属性
-        
-        # Copy trading attributes
-        self.enable_copy = True
-        self.buy_size_sol = 0.5
-        self.copy_trader = None
-        
-        # Load existing stats
-        self.trading_stats = self.logger.load_trading_stats()
-        
-    async def __aenter__(self):
-        """Async context manager entry."""
-        await self.initialize()
-        return self
-        
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
-        await self.shutdown()
-        
-    async def initialize(self):
-        """Initialize all bot components."""
-        try:
-            self.logger.log_info("Initializing memecoin trading bot...")
-            
-            # Initialize Jupiter trader
-            self.jupiter_trader = JupiterTrader(self.config)
-            await self.jupiter_trader.__aenter__()
-            
-            # Initialize DexScreener client
-            self.dexscreener_client = DexScreenerClient(
-                self.config, 
-                self._on_token_discovered
-            )
-            
-            # Initialize analyzers
-            self.twitter_analyzer = TwitterAnalyzer(self.config)
-            self.rugcheck_analyzer = RugCheckAnalyzer(self.config)
-            
-            # Initialize copy trader
-            self.copy_trader = CopyTrader(
-                self.config,
-                self.jupiter_trader,
-                self._on_leader_trade_detected
-            )
-            await self.copy_trader.__aenter__()
-            
-            # Initialize wallet monitor
-            self.wallet_monitor = WalletMonitor(
-                self.config,
-                self._on_new_token_in_wallet,
-                self._on_portfolio_change
-            )
-            
-            self.logger.log_info("Bot initialization complete")
-            
-        except Exception as e:
-            self.logger.log_error(e, "Bot initialization")
-            raise
-            
-    async def shutdown(self):
-        """Shutdown all bot components."""
-        try:
-            self.logger.log_info("Shutting down memecoin trading bot...")
-            
-            self.running = False
-            
-            # Stop all components
-            if self.dexscreener_client:
-                await self.dexscreener_client.stop()
-                
-            if self.copy_trader:
-                await self.copy_trader.stop_monitoring()
-                
-            if self.wallet_monitor:
-                await self.wallet_monitor.stop_monitoring()
-                
-            # Close connections
-            if self.jupiter_trader:
-                await self.jupiter_trader.__aexit__(None, None, None)
-                
-            if self.copy_trader:
-                await self.copy_trader.__aexit__(None, None, None)
-                
-            # Save final stats
-            self.logger.save_trading_stats(self.trading_stats)
-            
-            self.logger.log_info("Bot shutdown complete")
-            
-        except Exception as e:
-            self.logger.log_error(e, "Bot shutdown")
-            
-    def start_discovery(self):
-        """Start the discovery process."""
-        self.running = True
-        self.logger.log_info("Discovery started")
-        return True
-    
-    def stop_discovery(self):
-        """Stop the discovery process."""
-        self.running = False
-        self.logger.log_info("Discovery stopped")
-        return True
-
-    async def run_bot(self):
-        """Main bot execution loop."""
-        try:
-            self.running = True
-            self.logger.log_info("Starting memecoin trading bot...")
-            
-            # Start all monitoring tasks
-            tasks = []
-            
-            # DexScreener monitoring
-            if self.dexscreener_client:
-                tasks.append(asyncio.create_task(self.dexscreener_client.start()))
-                
-            # Copy trading monitoring
-            if self.copy_trader and self.config.copy_trading_enabled:
-                tasks.append(asyncio.create_task(self.copy_trader.start_monitoring()))
-                
-            # Wallet monitoring
-            if self.wallet_monitor:
-                tasks.append(asyncio.create_task(self.wallet_monitor.start_monitoring()))
-                
-            # Token analysis task
-            tasks.append(asyncio.create_task(self._token_analysis_loop()))
-            
-            # Position management task
-            tasks.append(asyncio.create_task(self._position_management_loop()))
-            
-            # Stats reporting task
-            tasks.append(asyncio.create_task(self._stats_reporting_loop()))
-            
-            # Wait for all tasks
-            await asyncio.gather(*tasks, return_exceptions=True)
-            
-        except Exception as e:
-            self.logger.log_error(e, "Bot main loop")
-        finally:
-            await self.shutdown()
-            
-    async def _on_token_discovered(self, token: TokenInfo):
-        """Handle newly discovered token."""
-        try:
-            self.logger.log_token_discovery(token)
-            self.discovered_tokens[token.address] = token
-            asyncio.create_task(self._analyze_token(token))
-        except Exception as e:
-            self.logger.log_error(e, "Token discovery handler")
-            
-    async def _analyze_token(self, token: TokenInfo):
-        """Analyze a discovered token."""
-        try:
-            token.status = TokenStatus.ANALYZING
-            self.logger.log_info(f"Starting analysis for {token.symbol}")
-            
-            # Twitter analysis
-            twitter_score = 0.0
-            if self.twitter_analyzer:
-                try:
-                    async with self.twitter_analyzer as analyzer:
-                        twitter_score = await analyzer.analyze_token(token)
-                        token.twitter_score = twitter_score
-                except Exception as e:
-                    self.logger.log_error(e, f"Twitter analysis for {token.symbol}")
-                    
-            # RugCheck analysis
-            rugcheck_score = "Unknown"
-            if self.rugcheck_analyzer:
-                try:
-                    rugcheck_result = await self.rugcheck_analyzer.analyze_token(token)
-                    if rugcheck_result:
-                        rugcheck_score = rugcheck_result.rating
-                        token.rugcheck_score = rugcheck_score
-                        
-                        if not self.rugcheck_analyzer.is_safe_token(rugcheck_result):
-                            token.status = TokenStatus.REJECTED
-                            self.logger.log_info(f"Token {token.symbol} rejected by RugCheck")
-                            return
-                except Exception as e:
-                    self.logger.log_error(e, f"RugCheck analysis for {token.symbol}")
-                    
-            # Calculate confidence score
-            confidence = self._calculate_confidence_score(token, twitter_score, rugcheck_score)
-            token.confidence_score = confidence
-            
-            # Log analysis results
-            self.logger.log_analysis_result(token, twitter_score, rugcheck_score, confidence)
-            
-            # Decide whether to trade
-            if confidence >= self.config.min_confidence_score:
-                token.status = TokenStatus.APPROVED
-                await self._consider_trading(token)
-            else:
-                token.status = TokenStatus.REJECTED
-                self.logger.log_info(f"Token {token.symbol} rejected due to low confidence: {confidence:.1f}%")
-                
-        except Exception as e:
-            self.logger.log_error(e, f"Token analysis for {token.symbol}")
-            token.status = TokenStatus.REJECTED
-            
-    def _calculate_confidence_score(self, token: TokenInfo, twitter_score: float, rugcheck_score: str) -> float:
-        """Calculate overall confidence score for a token."""
-        try:
-            score = 0.0
-            
-            # Twitter score (40% weight)
-            score += (twitter_score / 100) * 40
-            
-            # RugCheck score (30% weight)
-            rugcheck_scores = {
-                "Good": 100, "Excellent": 100, "Safe": 80, "Fair": 60,
-                "Poor": 20, "Bad": 0, "Dangerous": 0, "Rug": 0
-            }
-            rugcheck_value = rugcheck_scores.get(rugcheck_score, 50)
-            score += (rugcheck_value / 100) * 30
-            
-            # Token metrics (30% weight)
-            metrics_score = 0
-            
-            # Volume score
-            if token.volume_24h > 10_000_000:
-                metrics_score += 30
-            elif token.volume_24h > 1_000_000:
-                metrics_score += 20
-            elif token.volume_24h > 100_000:
-                metrics_score += 10
-                
-            # Liquidity score
-            if token.liquidity > 1_000_000:
-                metrics_score += 20
-            elif token.liquidity > 100_000:
-                metrics_score += 15
-            elif token.liquidity > 10_000:
-                metrics_score += 10
-                
-            # Holder count score
-            if token.holders > 10000:
-                metrics_score += 20
-            elif token.holders > 1000:
-                metrics_score += 15
-            elif token.holders > 100:
-                metrics_score += 10
-                
-            # Price stability score
-            if abs(token.price_change_24h) < 10:
-                metrics_score += 15
-            elif abs(token.price_change_24h) < 30:
-                metrics_score += 10
-            elif abs(token.price_change_24h) < 50:
-                metrics_score += 5
-                
-            score += (metrics_score / 100) * 30
-            
-            return min(score, 100.0)
-            
-        except Exception as e:
-            self.logger.log_error(e, "Confidence score calculation")
+        except ValueError:
             return 0.0
             
-    async def _consider_trading(self, token: TokenInfo):
-        """Consider trading a token based on analysis."""
-        try:
-            if not self.jupiter_trader:
-                return
-                
-            # Check if we already have a position
-            if token.address in self.active_positions:
-                self.logger.log_info(f"Already have position in {token.symbol}")
-                return
-                
-            # Check available SOL balance
-            sol_balance = await self.jupiter_trader.get_sol_balance()
-            if sol_balance < 0.01:  # Minimum 0.01 SOL
-                self.logger.log_warning("Insufficient SOL balance for trading")
-                return
-                
-            # Calculate position size
-            position_size = min(sol_balance * self.config.max_position_size, 1.0)  # Max 1 SOL
-            
-            # Execute buy order
-            self.logger.log_info(f"Executing buy order for {token.symbol}: {position_size:.4f} SOL")
-            
-            trade = await self.jupiter_trader.buy_token(token, position_size)
-            
-            if trade and trade.success:
-                # Update stats
-                self.trading_stats.total_trades += 1
-                self.trading_stats.successful_trades += 1
-                self.trading_stats.total_volume += trade.amount * trade.price
-                
-                # Add to active positions
-                self.active_positions[token.address] = token
-                token.status = TokenStatus.TRADING
-                
-                self.logger.log_trade(trade)
-            else:
-                self.logger.log_warning(f"Failed to buy {token.symbol}")
-                
-        except Exception as e:
-            self.logger.log_error(e, f"Trading consideration for {token.symbol}")
-            
-    async def _on_leader_trade_detected(self, leader_trade):
-        """Handle detected leader trade for copy trading."""
-        try:
-            self.logger.log_info(
-                f"Leader trade detected: {leader_trade.trade_type.value} "
-                f"{leader_trade.token_address} (confidence: {leader_trade.confidence_score:.1f}%)"
-            )
-            
-            # Copy the trade
-            if self.copy_trader:
-                trade = await self.copy_trader.copy_trade(leader_trade)
-                if trade:
-                    self.logger.log_trade(trade)
-                    
-        except Exception as e:
-            self.logger.log_error(e, "Leader trade handler")
-            
-    async def _on_new_token_in_wallet(self, token: WalletToken):
-        """Handle new token detected in wallet."""
-        try:
-            self.logger.log_info(f"New token in wallet: {token.symbol} ({token.address})")
-            
-            # Add to known tokens if we have the analyzers
-            if self.copy_trader:
-                # Create TokenInfo from WalletToken
-                token_info = TokenInfo(
-                    address=token.address,
-                    symbol=token.symbol,
-                    name=token.name,
-                    decimals=9,  # Default
-                    price=token.price,
-                    market_cap=0,  # Will be updated
-                    fdv=0,
-                    volume_24h=0,
-                    price_change_24h=0,
-                    liquidity=0,
-                    holders=0,
-                    created_at=token.last_updated
-                )
-                self.copy_trader.add_known_token(token_info)
-                
-        except Exception as e:
-            self.logger.log_error(e, "New token in wallet handler")
-            
-    async def _on_portfolio_change(self, snapshot: PortfolioSnapshot):
-        """Handle portfolio changes."""
-        try:
-            self.logger.log_portfolio_change(snapshot.to_dict())
-            
-        except Exception as e:
-            self.logger.log_error(e, "Portfolio change handler")
-            
-    async def _token_analysis_loop(self):
-        """Background loop for token analysis."""
-        while self.running:
-            try:
-                # Process pending tokens
-                pending_tokens = [
-                    token for token in self.discovered_tokens.values()
-                    if token.status == TokenStatus.PENDING
-                ]
-                
-                for token in pending_tokens[:5]:  # Process up to 5 at a time
-                    await self._analyze_token(token)
-                    
-                await asyncio.sleep(30)  # Check every 30 seconds
-                
-            except Exception as e:
-                self.logger.log_error(e, "Token analysis loop")
-                await asyncio.sleep(60)
-                
-    async def _position_management_loop(self):
-        """Background loop for position management."""
-        while self.running:
-            try:
-                # Check stop loss and take profit
-                for address, token in list(self.active_positions.items()):
-                    await self._check_position_exit(token)
-                    
-                await asyncio.sleep(60)  # Check every minute
-                
-            except Exception as e:
-                self.logger.log_error(e, "Position management loop")
-                await asyncio.sleep(60)
-                
-    async def _check_position_exit(self, token: TokenInfo):
-        """Check if a position should be exited."""
-        try:
-            if not self.jupiter_trader:
-                return
-                
-            # Get current price (simplified - in practice you'd get real-time price)
-            # For now, we'll use a simple time-based exit
-            position_age = datetime.now() - token.created_at
-            
-            # Exit after 1 hour for demo purposes
-            if position_age > timedelta(hours=1):
-                self.logger.log_info(f"Exiting position in {token.symbol} (time-based)")
-                await self._exit_position(token)
-                
-        except Exception as e:
-            self.logger.log_error(e, f"Position exit check for {token.symbol}")
-            
-    async def _exit_position(self, token: TokenInfo):
-        """Exit a position by selling the token."""
-        try:
-            if not self.jupiter_trader:
-                return
-                
-            # Get token balance
-            balance = await self.jupiter_trader._get_token_balance(token.address)
-            if balance <= 0:
-                self.logger.log_warning(f"No balance to sell for {token.symbol}")
-                return
-                
-            # Execute sell order
-            trade = await self.jupiter_trader.sell_token(token, balance)
-            
-            if trade and trade.success:
-                # Update stats
-                self.trading_stats.total_trades += 1
-                if trade.amount * trade.price > 0:
-                    self.trading_stats.successful_trades += 1
-                    
-                # Remove from active positions
-                if token.address in self.active_positions:
-                    del self.active_positions[token.address]
-                    
-                token.status = TokenStatus.SOLD
-                self.logger.log_trade(trade)
-            else:
-                self.logger.log_warning(f"Failed to sell {token.symbol}")
-                
-        except Exception as e:
-            self.logger.log_error(e, f"Position exit for {token.symbol}")
-            
-    async def _stats_reporting_loop(self):
-        """Background loop for stats reporting."""
-        while self.running:
-            try:
-                # Update win rate
-                self.trading_stats.update_win_rate()
-                
-                # Log stats every 10 minutes
-                self.logger.log_info(
-                    f"STATS: Trades: {self.trading_stats.total_trades}, "
-                    f"Success: {self.trading_stats.successful_trades}, "
-                    f"Win Rate: {self.trading_stats.win_rate:.1f}%, "
-                    f"Active Positions: {len(self.active_positions)}"
-                )
-                
-                # Save stats
-                self.logger.save_trading_stats(self.trading_stats)
-                
-                await asyncio.sleep(600)  # Every 10 minutes
-                
-            except Exception as e:
-                self.logger.log_error(e, "Stats reporting loop")
-                await asyncio.sleep(60)
-                
-    def get_status(self) -> Dict[str, Any]:
-        """Get current bot status."""
-        return {
-            "running": self.running,
-            "discovered_tokens": len(self.discovered_tokens),
-            "active_positions": len(self.active_positions),
-            "trading_stats": self.trading_stats.to_dict(),
-            "config": {
-                "max_position_size": self.config.max_position_size,
-                "min_confidence_score": self.config.min_confidence_score,
-                "copy_trading_enabled": self.config.copy_trading_enabled
-            }
-        }
+def parse_number_twitter(text: str) -> int:
+    """Parse abbreviated numbers for Twitter followers."""
+    return int(parse_number(text))
 
+def is_memecoin(base_token: Dict[str, Any]) -> bool:
+    name_lower = base_token.get('name', '').lower()
+    symbol_lower = base_token.get('symbol', '').lower()
+    meme_keywords = [
+        'doge', 'shib', 'pepe', 'floki', 'bonk', 'maga', 'trump', 'biden',
+        'dog', 'cat', 'frog', 'meme', 'coin', 'pump', 'moon', 'rocket',
+        'baby', 'mini', 'nano', 'micro', 'mega', 'giga'
+    ]
+    return any(keyword in name_lower or keyword in symbol_lower for keyword in meme_keywords)
 
-async def main():
-    """Main entry point for the bot."""
-    # Setup logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    logger = logging.getLogger(__name__)
+async def fetch_trending_pairs(max_pairs: int = 200, timeout: int = 10) -> List[Dict[str, Any]]:
+    """Fetch trending pairs using REST API with fallback sample."""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Origin": "https://dexscreener.com"
+    }
+    all_pairs = []
     
+    # REST API for trending Solana pairs
+    rest_url = "https://api.dexscreener.com/latest/dex/pairs/solana?rankBy=trendingScore&order=desc&limit=200"
     try:
-        async with MemecoinBot() as bot:
-            await bot.run_bot()
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
+        response = await asyncio.to_thread(requests.get, rest_url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            if 'pairs' in data:
+                all_pairs = data['pairs'][:max_pairs]
+                logger.info(f"Successfully fetched {len(all_pairs)} pairs from REST API.")
+                return all_pairs
     except Exception as e:
-        logger.error(f"Bot error: {e}")
+        logger.warning(f"REST API fetch failed: {e}")
+    
+    # Fallback sample data
+    logger.warning("Using fallback sample data.")
+    sample_pairs = [
+        {
+            "baseToken": {"name": "BONK", "symbol": "BONK", "address": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"},
+            "fdv": "1000000000", "volume": {"h24": "50000000"}, "priceChange": {"h24": "5.2"},
+            "pairAddress": "pair1", "priceUsd": "0.000001"
+        },
+        {
+            "baseToken": {"name": "PEPE", "symbol": "PEPE", "address": "pepe1234567890"},
+            "fdv": "500000000", "volume": {"h24": "20000000"}, "priceChange": {"h24": "15"},
+            "pairAddress": "pair2", "priceUsd": "0.0000001"
+        }
+    ]
+    return sample_pairs * (max_pairs // 2 + 1)  # Duplicate for demo
 
+def extract_memecoins(pairs: List[Dict[str, Any]]) -> List[MemecoinData]:
+    memecoins = []
+    for pair in pairs:
+        base_token = pair.get('baseToken', {})
+        if not is_memecoin(base_token):
+            continue
+        symbol = base_token.get('symbol', 'Unknown')
+        name = base_token.get('name', 'Unknown')
+        address = base_token.get('address', '')
+        pair_address = pair.get('pairAddress', '')
+        price_usd = parse_number(pair.get('priceUsd', '0'))
+        price_change_24h = parse_number(str(pair.get('priceChange', {}).get('h24', '0')))
+        volume_24h = parse_number(str(pair.get('volume', {}).get('h24', '0')))
+        fdv = parse_number(str(pair.get('fdv', '0')))
+        info = pair.get('info', {})
+        socials = info.get('socials', [])
+        twitter_handle = next((s.get('handle') for s in socials if s.get('platform') == 'twitter'), None)
+        social_engagement = int(parse_number(str(next((s.get('followers', '0') for s in socials), '0')))) or 10000  # 默认10000
+        memecoins.append(MemecoinData(
+            symbol=symbol, name=name, address=address, fdv=fdv, volume_24h=volume_24h,
+            social_engagement=social_engagement, twitter_handle=twitter_handle,
+            pair_address=pair_address, price_usd=price_usd, price_change_24h=price_change_24h
+        ))
+    return memecoins
+
+def filter_and_sort_memecoins(memecoins: List[MemecoinData], min_volume: float = 1000000, 
+                              min_fdv: float = 100000, min_engagement: int = 10000) -> List[MemecoinData]:
+    filtered = []
+    for m in memecoins:
+        try:
+            v = parse_number(str(m.volume_24h))
+            f = parse_number(str(m.fdv))
+            e = parse_number(str(m.social_engagement))
+            if v >= min_volume and f >= min_fdv and e >= min_engagement:
+                filtered.append(m)
+        except (ValueError, TypeError, AttributeError):
+            logger.warning(f"Skipping {m.name}: invalid data")
+            continue
+    def score(m: MemecoinData) -> float:
+        return (parse_number(str(m.volume_24h)) / 1000000 + 
+                parse_number(str(m.fdv)) / 10000000 + 
+                parse_number(str(m.social_engagement)) / 10000)
+    return sorted(filtered, key=score, reverse=True)
+
+class PriorityFeeOptimizer:
+    def __init__(self, client: AsyncClient):
+        self.client = client
+    
+    async def get_optimized_fee(self, multiplier: float = 1.5) -> int:
+        try:
+            response = requests.post(
+                self.client._provider.endpoint_uri,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "getRecentPrioritizationFees",
+                    "params": [{}]
+                }
+            )
+            fees_data = response.json().get('result', [])
+            if fees_data:
+                avg_fee = sum(f['prioritizationFee'] for f in fees_data[-10:]) // 10
+                return int(avg_fee * multiplier)
+            return 10000
+        except Exception:
+            return 10000
+
+class SlippageOptimizer:
+    def get_optimized_slippage(self, price_change_24h: float, volume_24h: float) -> int:
+        base_slippage = 300
+        volatility_factor = abs(price_change_24h) / 10
+        volume_factor = max(1, 1000000 / (volume_24h + 1))
+        adjusted = base_slippage + int(volatility_factor * 100) + int(volume_factor * 100)
+        return min(adjusted, 1000)
+
+class BuySellModule:
+    def __init__(self, config: TradeConfig):
+        self.config = config
+        self.client = AsyncClient(config.rpc_endpoint)
+        self.priority_optimizer = PriorityFeeOptimizer(self.client)
+        self.slippage_optimizer = SlippageOptimizer()
+    
+    async def optimize_params(self, token_data: Dict[str, Any]) -> Dict[str, Any]:
+        pri_fee = await self.priority_optimizer.get_optimized_fee()
+        slippage = self.slippage_optimizer.get_optimized_slippage(
+            token_data.get('price_change_24h', 0), token_data.get('volume_24h', 0)
+        )
+        fdv = token_data.get('fdv', 1000000)
+        buy_size = max(0.1, min(self.config.buy_size_sol, 10000000 / fdv * 0.1))
+        return {'priority_fee': pri_fee, 'slippage_bps': slippage, 'buy_size_sol': buy_size}
+    
+    async def get_quote(self, input_mint: str, output_mint: str, amount: int, slippage_bps: int) -> Optional[Dict]:
+        params = {'inputMint': input_mint, 'outputMint': output_mint, 'amount': amount, 'slippageBps': slippage_bps}
+        try:
+            response = requests.get(JUPITER_QUOTE_API, params=params)
+            return response.json() if response.status_code == 200 else None
+        except:
+            return None
+    
+    async def execute_swap(self, quote_response: Dict, priority_fee: int) -> Optional[Signature]:
+        swap_request = {'quoteResponse': quote_response, 'userPublicKey': str(self.config.wallet_keypair.pubkey()), 'wrapAndUnwrapSol': True, 'computeUnitPriceMicroLamports': priority_fee}
+        try:
+            response = requests.post(JUPITER_SWAP_API, json=swap_request)
+            swap_data = response.json()
+            swap_transaction = swap_data['swapTransaction']
+            raw_tx = base58.b58decode(swap_transaction)
+            tx = Transaction.deserialize(raw_tx)
+            tx.sign(self.config.wallet_keypair)
+            cu_limit_ix = set_compute_unit_limit(200_000)
+            cu_price_ix = set_compute_unit_price(priority_fee)
+            tx.add(cu_limit_ix)
+            tx.add(cu_price_ix)
+            result = await self.client.send_transaction(tx, self.config.wallet_keypair, opts=Confirmed)
+            return result.value
+        except Exception as e:
+            logger.error(f"Swap execution error: {e}")
+            return None
+    
+    async def buy_token(self, mint_address: str, token_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        optimized = await self.optimize_params(token_data)
+        amount_lamports = int(optimized['buy_size_sol'] * 1000000000)
+        quote = await self.get_quote(SOL_MINT, mint_address, amount_lamports, optimized['slippage_bps'])
+        if not quote:
+            return None
+        sig = await self.execute_swap(quote, optimized['priority_fee'])
+        return {'action': 'buy', 'mint': mint_address, 'amount_sol': optimized['buy_size_sol'], 'slippage_bps': optimized['slippage_bps'], 'priority_fee': optimized['priority_fee'], 'signature': str(sig) if sig else None}
+    
+    async def sell_token(self, mint_address: str, percentage: float = 100.0, token_data: Dict[str, Any] = None) -> Optional[Dict[str, Any]]:
+        if not token_data:
+            token_data = {}
+        optimized = await self.optimize_params(token_data)
+        balance_lamports = 1000000000  # Placeholder
+        sell_amount = int(balance_lamports * (percentage / 100))
+        quote = await self.get_quote(mint_address, SOL_MINT, sell_amount, optimized['slippage_bps'])
+        if not quote:
+            return None
+        sig = await self.execute_swap(quote, optimized['priority_fee'])
+        return {'action': 'sell', 'mint': mint_address, 'percentage': percentage, 'slippage_bps': optimized['slippage_bps'], 'priority_fee': optimized['priority_fee'], 'signature': str(sig) if sig else None}
+
+class CopyTradeModule(BuySellModule):
+    def __init__(self, config: CopyTradeConfig):
+        super().__init__(config)
+        self.processed_signatures = set()
+        self.held_positions: Dict[str, Dict[str, Any]] = {}
+    
+    async def rpc_request(self, method: str, params: List[Any]) -> Dict[str, Any]:
+        data = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+        response = requests.post(self.config.rpc_endpoint, json=data)
+        return response.json() if response.status_code == 200 else {}
+    
+    async def get_recent_signatures(self, address: str, limit: int = 5) -> List[Dict[str, Any]]:
+        params = [address, {"limit": limit}]
+        resp = await self.rpc_request("getSignaturesForAddress", params)
+        return resp.get('result', [])
+    
+    async def get_transaction(self, signature: str) -> Dict[str, Any]:
+        params = [signature, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}]
+        resp = await self.rpc_request("getTransaction", params)
+        return resp.get('result', {})
+    
+    def parse_token_transfers(self, transaction: Dict[str, Any]) -> List[Dict[str, Any]]:
+        transfers = []
+        if not transaction or 'transaction' not in transaction:
+            return transfers
+        message = transaction['transaction']['message']
+        instructions = message.get('instructions', [])
+        for instr in instructions:
+            if 'parsed' in instr and instr['program'] == 'spl-token':
+                info = instr['parsed']['info']
+                if 'mint' in info and info['mint'] != SOL_MINT:
+                    is_buy = 'destination' in info and info['destination'] == self.config.leader_wallet
+                    transfers.append({'mint': info['mint'], 'amount': int(info.get('amount', 0)), 'is_buy': is_buy})
+        return transfers
+    
+    async def get_token_price(self, mint: str) -> Optional[float]:
+        url = f"https://api.dexscreener.com/latest/dex/tokens/{mint}"
+        try:
+            resp = requests.get(url)
+            data = resp.json()
+            if data['pairs']:
+                return parse_number(data['pairs'][0]['priceUsd'])
+        except:
+            pass
+        return None
+    
+    async def copy_buy(self, mint: str, amount: int, token_data: Dict[str, Any] = None) -> Optional[Dict[str, Any]]:
+        optimized = await self.optimize_params(token_data)
+        amount_lamports = int(optimized['buy_size_sol'] * 1000000000)
+        quote = await self.get_quote(SOL_MINT, mint, amount_lamports, optimized['slippage_bps'])
+        if not quote:
+            return None
+        sig = await self.execute_swap(quote, optimized['priority_fee'])
+        entry_price = await self.get_token_price(mint)
+        self.held_positions[mint] = {'entry_price': entry_price, 'amount': amount_lamports}
+        return {'action': 'copy_buy', 'mint': mint, 'amount_sol': optimized['buy_size_sol'], 'entry_price': entry_price, 'signature': str(sig) if sig else None}
+    
+    async def copy_sell(self, mint: str, percentage: float = 100.0) -> Optional[Dict[str, Any]]:
+        if mint not in self.held_positions:
+            return None
+        optimized = await self.optimize_params()
+        balance_lamports = self.held_positions[mint]['amount']
+        sell_amount = int(balance_lamports * (percentage / 100))
+        quote = await self.get_quote(mint, SOL_MINT, sell_amount, optimized['slippage_bps'])
+        if not quote:
+            return None
+        sig = await self.execute_swap(quote, optimized['priority_fee'])
+        if percentage >= 100:
+            del self.held_positions[mint]
+        return {'action': 'copy_sell', 'mint': mint, 'percentage': percentage, 'signature': str(sig) if sig else None}
+    
+    async def monitor_and_copy(self):
+        logger.info(f"Starting copy trading: Monitoring leader {self.config.leader_wallet}")
+        while True:
+            try:
+                signatures = await self.get_recent_signatures(self.config.leader_wallet, 5)
+                for sig_info in reversed(signatures):
+                    signature = sig_info['signature']
+                    if signature in self.processed_signatures:
+                        continue
+                    self.processed_signatures.add(signature)
+                    tx = await self.get_transaction(signature)
+                    transfers = self.parse_token_transfers(tx)
+                    for transfer in transfers:
+                        mint = transfer['mint']
+                        is_buy = transfer['is_buy']
+                        token_data = {}
+                        url = f"https://api.dexscreener.com/latest/dex/tokens/{mint}"
+                        try:
+                            resp = requests.get(url)
+                            data = resp.json()
+                            if data['pairs']:
+                                pair = data['pairs'][0]
+                                token_data = {'volume_24h': parse_number(pair.get('volume', {}).get('h24', '0')), 'price_change_24h': parse_number(pair.get('priceChange', {}).get('h24', '0'))}
+                        except:
+                            pass
+                        confidence = 0.8  # Placeholder
+                        if is_buy and mint not in self.held_positions and confidence >= self.config.min_confidence:
+                            result = await self.copy_buy(mint, transfer['amount'], token_data)
+                            if result:
+                                logger.info(f"Copied buy: {result}")
+                                self.log_trade(result)
+                        elif not is_buy and mint in self.held_positions:
+                            result = await self.copy_sell(mint, self.config.sell_percentage)
+                            if result:
+                                logger.info(f"Copied sell: {result}")
+                                self.log_trade(result)
+                await asyncio.sleep(10)
+            except Exception as e:
+                logger.error(f"Copy trade error: {e}")
+                await asyncio.sleep(10)
+    
+    def log_trade(self, trade: Dict[str, Any]):
+        trade['timestamp'] = datetime.now().isoformat()
+        with open('trades.json', 'a') as f:
+            json.dump(trade, f)
+            f.write('\n')
+
+def scrape_twitter_profile(handle: str) -> Dict[str, Any]:
+    url = f"https://x.com/{handle}"
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code != 200:
+            return {}
+        soup = BeautifulSoup(response.text, 'html.parser')
+        name_elem = soup.find('h2', {'data-testid': 'UserName'})
+        name = name_elem.get_text(strip=True) if name_elem else 'Unknown'
+        bio_elem = soup.find('div', {'data-testid': 'UserDescription'})
+        bio = bio_elem.get_text(strip=True) if bio_elem else ''
+        stats = soup.find_all('a', href=re.compile(r'/following|/followers'))
+        followers_text = next((s.get_text(strip=True) for s in stats if 'followers' in s.get_text().lower()), '')
+        following_text = next((s.get_text(strip=True) for s in stats if 'following' in s.get_text().lower()), '')
+        followers = parse_number_twitter(followers_text)
+        following = parse_number_twitter(following_text)
+        tweet_stat = soup.find('a', href=re.compile(r'/with_replies'))
+        tweets_text = tweet_stat.get_text(strip=True) if tweet_stat else ''
+        tweets_count = parse_number_twitter(tweets_text)
+        verified = bool(soup.find('svg', {'data-testid': 'icon-verified'}))
+        joined_elem = soup.find('time', {'datetime': True})
+        joined_date = joined_elem['datetime'] if joined_elem else 'Unknown'
+        location_elem = soup.find('span', string=re.compile(r','))
+        location = location_elem.get_text(strip=True) if location_elem else None
+        return {'handle': handle, 'name': name, 'bio': bio, 'followers': followers, 'following': following, 'tweets_count': tweets_count, 'verified': verified, 'joined_date': joined_date, 'location': location}
+    except Exception as e:
+        logger.error(f"Twitter profile scrape error: {e}")
+        return {}
+
+def scrape_recent_tweets(handle: str, limit: int = 10) -> List[Dict[str, Any]]:
+    url = f"https://x.com/{handle}"
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+    tweets = []
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        tweet_articles = soup.find_all('article', {'data-testid': 'tweet'}, limit=limit)
+        for article in tweet_articles:
+            text_elem = article.find('div', {'data-testid': 'tweetText'})
+            text = text_elem.get_text(strip=True) if text_elem else ''
+            time_elem = article.find('time')
+            date = time_elem['datetime'] if time_elem else 'Unknown'
+            likes_text = article.find('div', string=re.compile(r'likes?')).get_text(strip=True) if article.find('div', string=re.compile(r'likes?')) else ''
+            likes = parse_number_twitter(likes_text)
+            retweets_text = article.find('div', string=re.compile(r'reposts?')).get_text(strip=True) if article.find('div', string=re.compile(r'reposts?')) else ''
+            retweets = parse_number_twitter(retweets_text)
+            replies_text = article.find('div', string=re.compile(r'replies?')).get_text(strip=True) if article.find('div', string=re.compile(r'replies?')) else ''
+            replies = parse_number_twitter(replies_text)
+            if text:
+                tweets.append({'text': text[:100] + '...' if len(text) > 100 else text, 'date': date, 'likes': likes, 'retweets': retweets, 'replies': replies})
+        time.sleep(2)
+    except Exception as e:
+        logger.error(f"Twitter tweets scrape error: {e}")
+    return tweets
+
+def analyze_quality(profile: Dict[str, Any], tweets: List[Dict[str, Any]]) -> TwitterAccountQuality:
+    if not profile or not tweets:
+        return None
+    followers = profile['followers']
+    following = profile['following']
+    total_likes = sum(t['likes'] for t in tweets)
+    total_retweets = sum(t['retweets'] for t in tweets)
+    total_replies = sum(t['replies'] for t in tweets)
+    num_tweets = len(tweets)
+    avg_likes = total_likes / num_tweets if num_tweets > 0 else 0
+    avg_retweets = total_retweets / num_tweets if num_tweets > 0 else 0
+    avg_replies = total_replies / num_tweets if num_tweets > 0 else 0
+    total_engagements = total_likes + total_retweets + total_replies
+    engagement_rate = (total_engagements / followers * 100) if followers > 0 else 0
+    follower_ratio = followers / following if following > 0 else float('inf')
+    score = 0
+    if profile['verified']:
+        score += 20
+    score += min(engagement_rate * 3, 30)
+    score += min((follower_ratio - 1) * 5, 20) if follower_ratio > 1 else 0
+    activity = profile['tweets_count'] / followers if followers > 0 else 0
+    score += min(activity * 3000, 30)
+    quality = TwitterAccountQuality(
+        handle=profile['handle'], name=profile['name'], bio=profile['bio'], followers=followers, following=following,
+        tweets_count=profile['tweets_count'], verified=profile['verified'], joined_date=profile['joined_date'],
+        location=profile['location'], recent_tweets=tweets, avg_likes=avg_likes, avg_retweets=avg_retweets,
+        avg_replies=avg_replies, engagement_rate=engagement_rate, follower_ratio=follower_ratio, quality_score=round(score, 2)
+    )
+    return quality
+
+class RugCheckAnalyzer:
+    def __init__(self, headless: bool = True):
+        chrome_options = Options()
+        if headless:
+            chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        self.driver = webdriver.Chrome(options=chrome_options)
+        self.wait = WebDriverWait(self.driver, 10)
+    
+    def check_token(self, contract_address: str) -> RugCheckResult:
+        url = f"{RUGCHECK_BASE_URL}{contract_address}"
+        self.driver.get(url)
+        try:
+            self.wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+            time.sleep(3)
+            result = RugCheckResult(rating=None, warnings=[], top_holders=[], has_large_whale=False, liquidity=None, market_cap=None, other_metrics={})
+            try:
+                rating_elem = self.driver.find_element(By.CSS_SELECTOR, "[data-testid='risk-rating'], .rating-badge")
+                result.rating = rating_elem.text.strip()
+            except NoSuchElementException:
+                pass
+            warnings = self.driver.find_elements(By.CSS_SELECTOR, ".warning, .alert, [class*='risk']")
+            for warning in warnings:
+                text = warning.text.strip()
+                if text and ('scam' in text.lower() or 'rug' in text.lower()):
+                    result.warnings.append(text)
+            try:
+                holders_section = self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "[data-testid='holders'], .holders-table")))
+                holder_rows = holders_section.find_elements(By.TAG_NAME, "tr")
+                for row in holder_rows[1:6]:
+                    cells = row.find_elements(By.TAG_NAME, "td")
+                    if len(cells) >= 2:
+                        wallet = cells[0].text.strip()
+                        pct_text = cells[1].text.strip().replace('%', '')
+                        try:
+                            pct = float(pct_text)
+                            result.top_holders.append({'wallet': wallet, 'percentage': pct})
+                            if pct > 10:
+                                result.has_large_whale = True
+                        except ValueError:
+                            pass
+            except TimeoutException:
+                pass
+            try:
+                liq_elem = self.driver.find_element(By.XPATH, "//div[contains(text(), 'Liquidity')]//following-sibling::div | //span[contains(text(), '$') and contains(../text(), 'Liquidity')]")
+                result.liquidity = parse_number(liq_elem.text)
+            except NoSuchElementException:
+                pass
+            try:
+                mc_elem = self.driver.find_element(By.XPATH, "//div[contains(text(), 'Market Cap')]//following-sibling::div | //span[contains(text(), '$') and contains(../text(), 'Market Cap')]")
+                result.market_cap = parse_number(mc_elem.text)
+            except NoSuchElementException:
+                pass
+            try:
+                mint_auth = self.driver.find_element(By.XPATH, "//div[contains(text(), 'Mint Authority')]//following-sibling::div").text
+                result.other_metrics['mint_authority'] = mint_auth == 'Revoked'
+            except NoSuchElementException:
+                pass
+            return result
+        except Exception as e:
+            logger.error(f"RugCheck error: {e}")
+            return RugCheckResult(rating='Error', warnings=[str(e)], top_holders=[], has_large_whale=False, liquidity=None, market_cap=None, other_metrics={})
+    
+    def close(self):
+        self.driver.quit()
+
+class WalletMonitor:
+    def __init__(self, wallet_address: str, rpc_endpoint: str):
+        self.wallet_address = wallet_address
+        self.rpc_endpoint = rpc_endpoint
+        self.processed_signatures = set()
+        self.data_array: List[Dict[str, Any]] = []
+    
+    async def rpc_request(self, method: str, params: List[Any]) -> Dict[str, Any]:
+        data = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+        response = requests.post(self.rpc_endpoint, json=data)
+        return response.json() if response.status_code == 200 else {}
+    
+    async def get_recent_signatures(self, limit: int = 5) -> List[Dict[str, Any]]:
+        params = [self.wallet_address, {"limit": limit}]
+        resp = await self.rpc_request("getSignaturesForAddress", params)
+        return resp.get('result', [])
+    
+    async def get_transaction(self, signature: str) -> Dict[str, Any]:
+        params = [signature, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}]
+        resp = await self.rpc_request("getTransaction", params)
+        return resp.get('result', {})
+    
+    def parse_token_transfers(self, transaction: Dict[str, Any]) -> List[str]:
+        mint_addresses = []
+        if not transaction or 'transaction' not in transaction:
+            return mint_addresses
+        message = transaction['transaction']['message']
+        instructions = message.get('instructions', [])
+        for instr in instructions:
+            if 'parsed' in instr and instr['program'] == 'spl-token':
+                if instr['parsed']['type'] in ['transfer', 'transferChecked']:
+                    info = instr['parsed']['info']
+                    if 'mint' in info:
+                        mint_addresses.append(info['mint'])
+        return list(set(mint_addresses))
+    
+    async def monitor_wallet(self):
+        logger.info(f"Starting wallet monitor for {self.wallet_address}")
+        while True:
+            try:
+                signatures = await self.get_recent_signatures(5)
+                for sig_info in reversed(signatures):
+                    signature = sig_info['signature']
+                    if signature in self.processed_signatures:
+                        continue
+                    self.processed_signatures.add(signature)
+                    transaction = await self.get_transaction(signature)
+                    mints = self.parse_token_transfers(transaction)
+                    for mint in mints:
+                        data_item = {'transaction_signature': signature, 'wallet_address': self.wallet_address, 'mint_address': mint, 'timestamp': sig_info.get('blockTime')}
+                        self.data_array.append(data_item)
+                        logger.info(f"Monitored new mint: {mint}")
+                await asyncio.sleep(10)
+            except Exception as e:
+                logger.error(f"Wallet monitor error: {e}")
+                await asyncio.sleep(10)
+
+class MemecoinBot:
+    def __init__(self, config: Optional[BotConfig] = None):
+        if config is None:
+            config = BotConfig()
+        self.config = config
+        keypair_bytes = base58.b58decode(config.private_key)
+        self.wallet_keypair = Keypair.from_bytes(keypair_bytes[:32])
+        self.leader_wallet = config.leader_wallet_address
+        self.buy_size_sol = config.max_position_size
+        self.slippage_bps = config.default_slippage
+        self.priority_fee = config.max_slippage  # Reuse for fee
+        self.copy_buy_size = 0.2
+        self.min_confidence = config.min_confidence_score
+        self.enable_copy = config.copy_trading_enabled
+        self.enable_monitor = True
+        self.enable_discovery = True
+        self.min_volume = 1000000
+        self.min_fdv = 100000
+        self.min_engagement = 10000
+        self.min_twitter_score = 70
+        self.trade_config = TradeConfig(self.wallet_keypair, self.config.solana_rpc_url, self.priority_fee, self.slippage_bps, self.buy_size_sol)
+        self.copy_config = CopyTradeConfig(self.leader_wallet, self.wallet_keypair, self.config.solana_rpc_url, self.priority_fee, self.slippage_bps, self.copy_buy_size, 100.0, self.min_confidence)
+        self.trader = BuySellModule(self.trade_config)
+        self.copy_trader = CopyTradeModule(self.copy_config) if self.enable_copy else None
+        self.wallet_monitor = WalletMonitor(str(self.wallet_keypair.pubkey()), self.config.solana_rpc_url) if self.enable_monitor else None
+        self.rug_analyzer = RugCheckAnalyzer(headless=True)
+        self.positions: Dict[str, Dict[str, Any]] = {}
+    
+    async def discovery_and_trade(self):
+        while True:
+            try:
+                if not self.enable_discovery:
+                    await asyncio.sleep(3600)
+                    continue
+                logger.info("Starting discovery cycle...")
+                pairs = await fetch_trending_pairs()
+                memecoins = extract_memecoins(pairs)
+                filtered_memecoins = filter_and_sort_memecoins(memecoins, self.min_volume, self.min_fdv, self.min_engagement)
+                logger.info(f"Filtered {len(filtered_memecoins)} memecoins.")
+                for coin in filtered_memecoins[:5]:
+                    token_data = {'fdv': coin.fdv, 'volume_24h': coin.volume_24h, 'price_change_24h': coin.price_change_24h}
+                    twitter_quality = None
+                    if coin.twitter_handle:
+                        profile = scrape_twitter_profile(coin.twitter_handle)
+                        tweets = scrape_recent_tweets(coin.twitter_handle)
+                        twitter_quality = analyze_quality(profile, tweets)
+                        if twitter_quality and twitter_quality.quality_score < self.min_twitter_score:
+                            logger.info(f"Twitter score too low for {coin.name}: {twitter_quality.quality_score}")
+                            continue
+                    rug_result = self.rug_analyzer.check_token(coin.address)
+                    if rug_result.rating != 'Good' or rug_result.has_large_whale:
+                        logger.info(f"RugCheck failed for {coin.name}: {rug_result.rating}, Whale: {rug_result.has_large_whale}")
+                        continue
+                    buy_result = await self.trader.buy_token(coin.address, token_data)
+                    if buy_result and buy_result['signature']:
+                        entry_price = await self.copy_trader.get_token_price(coin.address) if self.copy_trader else 0
+                        self.positions[coin.address] = {'entry_price': entry_price, 'bought_at': datetime.now()}
+                        logger.info(f"Bought {coin.name}: {buy_result}")
+                        if self.copy_trader:
+                            self.copy_trader.log_trade(buy_result)
+                        await asyncio.sleep(300)  # Check for sell
+                        current_price = await self.copy_trader.get_token_price(coin.address) if self.copy_trader else 0
+                        if current_price > entry_price * 2:
+                            sell_result = await self.trader.sell_token(coin.address)
+                            if sell_result:
+                                logger.info(f"Sold {coin.name} at 2x: {sell_result}")
+                                if self.copy_trader:
+                                    self.copy_trader.log_trade(sell_result)
+                                del self.positions[coin.address]
+                await asyncio.sleep(3600)
+            except Exception as e:
+                logger.error(f"Discovery error: {e}")
+                await asyncio.sleep(60)
+    
+    async def run_bot(self):
+        logger.info("MemecoinBot started.")
+        tasks = []
+        if self.enable_discovery:
+            tasks.append(asyncio.create_task(self.discovery_and_trade()))
+        if self.enable_copy and self.leader_wallet:
+            tasks.append(asyncio.create_task(self.copy_trader.monitor_and_copy()))
+        if self.enable_monitor:
+            tasks.append(asyncio.create_task(self.wallet_monitor.monitor_wallet()))
+        try:
+            await asyncio.gather(*tasks)
+        except KeyboardInterrupt:
+            logger.info("Bot stopped by user.")
+        finally:
+            self.rug_analyzer.close()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # 测试语法和功能
+    print("🧪 测试 memecoin_bot.py 功能...")
+    
+    # 测试导入
+    try:
+        from memecoin_bot import fetch_trending_pairs, extract_memecoins, filter_and_sort_memecoins, parse_number, is_memecoin, MemecoinData
+        print("✅ 所有导入成功")
+    except Exception as e:
+        print(f"❌ 导入失败: {e}")
+        exit(1)
+    
+    # 测试fetch_trending_pairs
+    try:
+        result = asyncio.run(fetch_trending_pairs())
+        print(f"✅ fetch_trending_pairs 测试成功，返回 {len(result)} 个代币对")
+        if result:
+            print(f"示例代币对: {result[0]['baseToken']['symbol']}")
+    except Exception as e:
+        print(f"❌ fetch_trending_pairs 测试失败: {e}")
+    
+    # 测试完整流程
+    try:
+        pairs = asyncio.run(fetch_trending_pairs())
+        memecoins = extract_memecoins(pairs)
+        filtered = filter_and_sort_memecoins(memecoins)
+        print(f"✅ 完整流程测试成功: {len(pairs)} -> {len(memecoins)} -> {len(filtered)}")
+    except Exception as e:
+        print(f"❌ 完整流程测试失败: {e}")
+    
+    print("🎉 所有测试通过！")
+    
+    # 启动机器人（可选）
+    # bot = MemecoinBot()
+    # asyncio.run(bot.run_bot())

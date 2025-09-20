@@ -1,1261 +1,286 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import json
-import os
-from datetime import datetime, timedelta
-import time
 import asyncio
 import logging
+from datetime import datetime
+from typing import Dict, Any, List, Optional
+import re
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Import bot components
+# 导入必要的模块
 try:
-    from memecoin_bot import MemecoinBot
-    from models import TokenInfo, Trade, TradeType, TokenStatus, BotConfig
+    from memecoin_bot import (
+        MemecoinBot, BotConfig, MemecoinData, 
+        fetch_trending_pairs, extract_memecoins, filter_and_sort_memecoins,
+        parse_number
+    )
 except ImportError as e:
-    logger.error(f"Import error: {e}")
     st.error(f"导入错误: {e}")
     st.stop()
 
-# Utility function for parsing number strings
-def parse_number(text: str) -> float:
-    """Parse number strings like '1.2M', '$1,000,000', '500K' to float with regex"""
-    if not text or text == '':
-        return 0.0
-    
-    # Convert to string if not already
-    text = str(text)
-    
-    # Use regex to clean the text - keep only digits, dots, K, M, B, $, %
-    import re
-    text = re.sub(r'[^\d. KM B$%]', '', text.upper())
-    
-    # Remove % if present
-    if '%' in text:
-        text = text.replace('%', '')
-    
-    # Remove $ and commas
-    text = text.replace('$', '').replace(',', '').strip()
-    
-    if not text or text == '0':
-        return 0.0
-    
-    try:
-        if 'K' in text:
-            return float(re.sub(r'K', '', text)) * 1000
-        elif 'M' in text:
-            return float(re.sub(r'M', '', text)) * 1000000
-        elif 'B' in text:
-            return float(re.sub(r'B', '', text)) * 1000000000
-        else:
-            return float(text)
-    except (ValueError, TypeError):
-        return 0.0
-
-# Import utility functions with fallbacks
-try:
-    from memecoin_bot import extract_memecoins, filter_and_sort_memecoins
-except ImportError:
-    # Define stubs if import fails
-    def extract_memecoins(pairs):
-        """Extract memecoin data from pairs"""
-        memecoins = []
-        for pair in pairs[:5]:  # Limit to 5 for safety
-            if 'baseToken' in pair:
-                # Parse string numbers to floats using parse_number
-                volume_24h = parse_number(str(pair.get('volume', {}).get('h24', '0')))
-                fdv = parse_number(str(pair.get('fdv', '0')))
-                price_change_24h = parse_number(str(pair.get('priceChange', {}).get('h24', '0')))
-                price = parse_number(str(pair.get('priceUsd', '0')))
-                
-                # Handle social engagement - use placeholder if not available
-                socials = pair.get('socials', [])
-                social_engagement = 10000  # Placeholder value
-                if socials and len(socials) > 0:
-                    social_engagement = int(socials[0].get('followers', 10000))
-                
-                memecoins.append({
-                    'symbol': pair['baseToken'].get('symbol', 'UNKNOWN'),
-                    'name': pair['baseToken'].get('name', 'Unknown Token'),
-                    'address': pair['baseToken'].get('address', 'unknown'),
-                    'price': price,
-                    'volume_24h': volume_24h,
-                    'price_change_24h': price_change_24h,
-                    'fdv': fdv,
-                    'social_engagement': social_engagement
-                })
-        return memecoins
-    
-    def filter_and_sort_memecoins(memecoins, min_volume=0, min_fdv=0, min_engagement=0):
-        """Filter and sort memecoins with safe comparisons using parse_number"""
-        if not memecoins:
-            return []
-        
-        # Use list comprehension with parse_number for safe filtering
-        filtered = [
-            m for m in memecoins 
-            if parse_number(str(m.get('volume_24h', 0))) >= min_volume 
-            and parse_number(str(m.get('fdv', 0))) >= min_fdv 
-            and m.get('social_engagement', 0) >= min_engagement
-        ]
-        
-        # Sort by volume (descending) using parse_number
-        return sorted(filtered, key=lambda x: parse_number(str(x.get('volume_24h', 0))), reverse=True)
-
-# Page configuration
+# 设置页面配置
 st.set_page_config(
-    page_title="Memecoin 交易机器人仪表板",
+    page_title="Memecoin Trading Bot Dashboard",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS
+# 自定义CSS
 st.markdown("""
 <style>
     .main-header {
-        text-align: center;
+        font-size: 2.5rem;
+        font-weight: bold;
         color: #1f77b4;
+        text-align: center;
         margin-bottom: 2rem;
-    }
-    .chinese-text {
-        font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
     }
     .metric-card {
         background-color: #f0f2f6;
         padding: 1rem;
         border-radius: 0.5rem;
-        margin: 0.5rem 0;
+        border-left: 4px solid #1f77b4;
     }
-    .status-running {
-        color: #00ff00;
+    .success-message {
+        color: #28a745;
         font-weight: bold;
     }
-    .status-stopped {
-        color: #ff0000;
+    .error-message {
+        color: #dc3545;
         font-weight: bold;
     }
-    .status-initializing {
-        color: #ffa500;
+    .warning-message {
+        color: #ffc107;
         font-weight: bold;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Enhanced init_bot function with caching
+# 初始化session state
+if "bot" not in st.session_state:
+    st.session_state.bot = None
+if "selected_mint" not in st.session_state:
+    st.session_state.selected_mint = None
+
+# 创建MockBot类作为备用
+class MockBot:
+    def __init__(self):
+        self.positions = {}
+        self.enable_copy = True
+        self.buy_size_sol = 0.5
+        self.copy_trader = None
+        self.min_volume = 1000000
+        self.min_fdv = 100000
+        self.min_engagement = 10000
+    
+    async def start_discovery(self):
+        print("Mock discovery started")
+    
+    async def stop_discovery(self):
+        print("Mock discovery stopped")
+    
+    async def fetch_trending_pairs(self):
+        return [
+            {"baseToken": {"name": "BONK", "symbol": "BONK", "address": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"}, "fdv": "1000000000", "volume": {"h24": "50000000"}, "priceChange": {"h24": "5.2"}, "pairAddress": "pair1", "priceUsd": "0.000001"},
+            {"baseToken": {"name": "PEPE", "symbol": "PEPE", "address": "pepe1234567890"}, "fdv": "500000000", "volume": {"h24": "20000000"}, "priceChange": {"h24": "15"}, "pairAddress": "pair2", "priceUsd": "0.0000001"},
+            {"baseToken": {"name": "DOGE", "symbol": "DOGE", "address": "doge1234567890"}, "fdv": "2000000000", "volume": {"h24": "100000000"}, "priceChange": {"h24": "8.5"}, "pairAddress": "pair3", "priceUsd": "0.0000005"}
+        ]
+
+# 初始化机器人
 @st.cache_resource
 def init_bot():
-    """Initialize bot with comprehensive error handling and caching"""
+    """初始化机器人，使用缓存避免重复初始化"""
     try:
-        # Try to initialize real MemecoinBot
-        bot = MemecoinBot()
-        logger.info("✅ Real MemecoinBot initialized successfully")
+        # 尝试创建真实的机器人
+        config = BotConfig()
+        bot = MemecoinBot(config)
         return bot
-    except (AttributeError, KeyError, TypeError) as e:
-        logger.error(f"Bot initialization failed due to missing .env or config: {e}")
-        st.error("⚠️ 机器人初始化失败，请检查 .env 配置文件")
-        return create_mock_bot()
-    except ImportError as e:
-        logger.error(f"Import error during bot initialization: {e}")
-        st.error("⚠️ 导入错误，使用模拟机器人")
-        return create_mock_bot()
     except Exception as e:
-        logger.error(f"Unexpected error during bot initialization: {e}")
-        st.warning("⚠️ 机器人初始化失败，使用模拟数据演示")
-        return create_mock_bot()
+        st.warning(f"机器人初始化失败，使用模拟模式: {e}")
+        return MockBot()
 
 def create_mock_bot():
-    """Create a robust MockBot with all necessary methods"""
-    class MockBot:
-        def __init__(self):
-            self.positions = {}
-            self.enable_copy = True
-            self.buy_size_sol = 0.5
-            self.running = False
-            self.discovered_tokens = {}
-            self.trades = []
-            self.trading_stats = type('MockStats', (), {
-                'total_trades': 0,
-                'successful_trades': 0,
-                'total_volume': 0.0,
-                'total_pnl': 0.0
-            })()
-            self.copy_trader = type('MockTrader', (object,), {'held_positions': {}})()
-            
-            # Create a mock dexscreener_client
-            self.dexscreener_client = type('MockDexScreenerClient', (), {
-                'fetch_trending_pairs': self.fetch_trending_pairs
-            })()
-        
-        async def fetch_trending_pairs(self, max_pairs=50):
-            """Mock fetch_trending_pairs method with comprehensive sample data"""
-            sample_data = [
-                {
-                    "baseToken": {"name": "MockCoin 1", "symbol": "MCK1", "address": "mock123"},
-                    "fdv": 1000000,
-                    "volume": {"h24": 2000000},
-                    "priceChange": {"h24": 10},
-                    "pairAddress": "pair123",
-                    "priceUsd": 0.001
-                },
-                {
-                    "baseToken": {"name": "MockCoin 2", "symbol": "MCK2", "address": "mock456"},
-                    "fdv": 2000000,
-                    "volume": {"h24": 3000000},
-                    "priceChange": {"h24": -5},
-                    "pairAddress": "pair456",
-                    "priceUsd": 0.002
-                },
-                {
-                    "baseToken": {"name": "MockCoin 3", "symbol": "MCK3", "address": "mock789"},
-                    "fdv": 5000000,
-                    "volume": {"h24": 1000000},
-                    "priceChange": {"h24": 25},
-                    "pairAddress": "pair789",
-                    "priceUsd": 0.003
-                },
-                {
-                    "baseToken": {"name": "MockCoin 4", "symbol": "MCK4", "address": "mock101"},
-                    "fdv": 3000000,
-                    "volume": {"h24": 4000000},
-                    "priceChange": {"h24": 15},
-                    "pairAddress": "pair101",
-                    "priceUsd": 0.004
-                },
-                {
-                    "baseToken": {"name": "MockCoin 5", "symbol": "MCK5", "address": "mock202"},
-                    "fdv": 1500000,
-                    "volume": {"h24": 2500000},
-                    "priceChange": {"h24": -8},
-                    "pairAddress": "pair202",
-                    "priceUsd": 0.005
-                }
-            ]
-            return sample_data[:max_pairs]
-        
-        def start_discovery(self):
-            """Mock start_discovery method"""
-            self.running = True
-            logger.info("Mock discovery started")
-            return True
-        
-        def stop_discovery(self):
-            """Mock stop_discovery method"""
-            self.running = False
-            logger.info("Mock discovery stopped")
-            return True
-        
-        async def mock_discovery_loop(self):
-            """Mock discovery loop for async operations"""
-            while self.running:
-                await asyncio.sleep(5)
-                logger.info("Mock discovery running...")
-    
+    """创建模拟机器人"""
     return MockBot()
 
-# Cached data fetching function
-@st.cache_data(ttl=60)
-def get_pairs():
-    """Get trending pairs with caching"""
+# 主标题
+st.markdown('<h1 class="main-header">🤖 Memecoin Trading Bot Dashboard</h1>', unsafe_allow_html=True)
+
+# 侧边栏
+with st.sidebar:
+    st.header("🎛️ 控制面板")
+    
+    # 机器人状态
     bot = init_bot()
-    if bot and hasattr(bot, 'dexscreener_client') and bot.dexscreener_client:
-        try:
-            return asyncio.run(bot.dexscreener_client.fetch_trending_pairs())
-        except Exception as e:
-            logger.error(f"Error fetching pairs from bot: {e}")
-            return asyncio.run(create_mock_bot().fetch_trending_pairs())
-    else:
-        return asyncio.run(create_mock_bot().fetch_trending_pairs())
-
-class DashboardManager:
-    def __init__(self):
-        self.bot = None
-        self.last_refresh = None
-        
-    def initialize_bot(self):
-        """Initialize the bot with environment variables using cached init_bot"""
-        try:
-            # Use the cached init_bot function
-            self.bot = init_bot()
-            return True
-        except Exception as e:
-            logger.error(f"Bot initialization failed: {e}")
-            # Fallback to MockBot for demo purposes
-            self.bot = create_mock_bot()
-            st.warning("⚠️ 机器人初始化失败，使用模拟数据演示")
-            return True  # 返回 True 因为 MockBot 已成功创建
-    
-    def _create_mock_bot(self):
-        """Create a MockBot with all necessary methods"""
-        class MockBot:
-            def __init__(self):
-                self.running = False
-                self.discovered_tokens = {}
-                self.trades = []
-                self.positions = {}
-                self.enable_copy = True
-                self.buy_size_sol = 0.5
-                self.trading_stats = type('MockStats', (), {
-                    'total_trades': 0,
-                    'successful_trades': 0,
-                    'total_volume': 0.0,
-                    'total_pnl': 0.0
-                })()
-                # Create a mock dexscreener_client
-                self.dexscreener_client = type('MockDexScreenerClient', (), {
-                    'fetch_trending_pairs': self.fetch_trending_pairs
-                })()
-            
-            async def fetch_trending_pairs(self, max_pairs=50):
-                """Mock fetch_trending_pairs method"""
-                sample_data = [
-                    {
-                        "baseToken": {"name": "Test Token 1", "symbol": "TST1", "address": "test123"},
-                        "fdv": 1000000,
-                        "volume": {"h24": 2000000},
-                        "priceChange": {"h24": 10}
-                    },
-                    {
-                        "baseToken": {"name": "Test Token 2", "symbol": "TST2", "address": "test456"},
-                        "fdv": 2000000,
-                        "volume": {"h24": 3000000},
-                        "priceChange": {"h24": -5}
-                    },
-                    {
-                        "baseToken": {"name": "Test Token 3", "symbol": "TST3", "address": "test789"},
-                        "fdv": 5000000,
-                        "volume": {"h24": 1000000},
-                        "priceChange": {"h24": 25}
-                    }
-                ]
-                return sample_data[:max_pairs]
-            
-            def start_discovery(self):
-                """Mock start_discovery method"""
-                self.running = True
-                print("Mock discovery started")
-                return True
-            
-            def stop_discovery(self):
-                """Mock stop_discovery method"""
-                self.running = False
-                print("Mock discovery stopped")
-                return True
-            
-            async def mock_discovery_loop(self):
-                """Mock discovery loop for async operations"""
-                while self.running:
-                    await asyncio.sleep(5)
-                    print("Mock discovery running...")
-        
-        mock_bot = MockBot()
-        return mock_bot
-    
-    def get_discovered_tokens(self):
-        """Get discovered tokens data"""
-        if not self.bot:
-            return pd.DataFrame()
-        
-        try:
-            tokens = []
-            for token in self.bot.discovered_tokens.values():
-                tokens.append({
-                    'Symbol': token.symbol,
-                    'Name': token.name,
-                    'Address': token.address,
-                    'Price': token.price,
-                    'Volume24h': token.volume_24h,
-                    'FDV': token.fdv,
-                    'Twitter Score': token.twitter_score,
-                    'RugCheck Score': token.rugcheck_score,
-                    'Status': token.status.value,
-                    'Discovered At': token.discovered_at.strftime('%Y-%m-%d %H:%M:%S') if token.discovered_at else 'N/A'
-                })
-            return pd.DataFrame(tokens)
-        except Exception as e:
-            logger.error(f"Error getting discovered tokens: {e}")
-            return pd.DataFrame()
-    
-    def get_trades_data(self):
-        """Get trades data from trades.json"""
-        try:
-            if os.path.exists('trades.json'):
-                with open('trades.json', 'r', encoding='utf-8') as f:
-                    trades_data = json.load(f)
-                
-                trades = []
-                for trade in trades_data:
-                    trades.append({
-                        'Timestamp': trade['timestamp'],
-                        'Type': trade['type'],
-                        'Symbol': trade['symbol'],
-                        'Amount': trade['amount'],
-                        'Price': trade['price'],
-                        'Success': trade['success'],
-                        'Confidence': trade.get('confidence', 0),
-                        'Reason': trade.get('reason', '')
-                    })
-                return pd.DataFrame(trades)
-            return pd.DataFrame()
-        except Exception as e:
-            logger.error(f"Error loading trades: {e}")
-            return pd.DataFrame()
-    
-    def get_positions_data(self):
-        """Get current positions data"""
-        if not self.bot:
-            return pd.DataFrame()
-        
-        try:
-            positions = []
-            for token_address, position in self.bot.positions.items():
-                token = self.bot.discovered_tokens.get(token_address)
-                if token:
-                    positions.append({
-                        'Symbol': token.symbol,
-                        'Address': token.address,
-                        'Amount': position['amount'],
-                        'Entry Price': position['entry_price'],
-                        'Current Price': token.price,
-                        'P&L': (token.price - position['entry_price']) * position['amount'],
-                        'P&L %': ((token.price - position['entry_price']) / position['entry_price']) * 100,
-                        'Hold Time': (datetime.now() - position['entry_time']).total_seconds() / 3600,  # hours
-                        'Confidence': position.get('confidence', 0)
-                    })
-            return pd.DataFrame(positions)
-        except Exception as e:
-            logger.error(f"Error getting positions: {e}")
-            return pd.DataFrame()
-    
-    def get_safety_data(self):
-        """Get RugCheck safety analysis data"""
-        if not self.bot:
-            return pd.DataFrame()
-        
-        try:
-            safety_data = []
-            for token in self.bot.discovered_tokens.values():
-                if hasattr(token, 'rugcheck_score') and token.rugcheck_score:
-                    safety_data.append({
-                        'Symbol': token.symbol,
-                        'RugCheck Score': token.rugcheck_score,
-                        'Status': token.status.value
-                    })
-            return pd.DataFrame(safety_data)
-        except Exception as e:
-            logger.error(f"Error getting safety data: {e}")
-            return pd.DataFrame()
-    
-    def generate_mock_tokens(self, count: int = 15):
-        """Generate mock tokens for demonstration"""
-        from models import TokenInfo, TokenStatus
-        import random
-        from datetime import datetime
-        
-        mock_tokens = []
-        symbols = ['PEPE', 'DOGE', 'BONK', 'SHIB', 'FLOKI', 'WOJAK', 'CHAD', 'KEKW', 'MOON', 'DEGEN', 'APE', 'MONKE', 'FROG', 'CAT', 'DOG']
-        
-        for i in range(count):
-            symbol = symbols[i % len(symbols)]
-            if i >= len(symbols):
-                symbol = f"{symbol}{i}"
-            
-            token = TokenInfo(
-                address=f"mock_address_{i}_{random.randint(1000, 9999)}",
-                symbol=symbol,
-                name=f"{symbol} Token",
-                decimals=9,
-                price=random.uniform(0.000001, 0.01),
-                market_cap=random.uniform(1000000, 100000000),
-                fdv=random.uniform(1000000, 100000000),
-                volume_24h=random.uniform(100000, 10000000),
-                price_change_24h=random.uniform(-50, 100),
-                liquidity=random.uniform(100000, 1000000),
-                holders=random.randint(100, 10000),
-                created_at=datetime.now(),
-                status=random.choice([TokenStatus.PENDING, TokenStatus.APPROVED, TokenStatus.TRADING]),
-                twitter_score=random.uniform(0, 100),
-                rugcheck_score=str(random.uniform(0, 100)),
-                confidence_score=random.uniform(0, 1),
-                is_memecoin=True
-            )
-            mock_tokens.append(token)
-        
-        return mock_tokens
-
-def render_sidebar(dashboard_manager):
-    """Render the sidebar with bot controls"""
-    st.sidebar.title("🤖 机器人控制")
-    
-    # 检查 bot 是否已初始化
-    if dashboard_manager.bot is None:
-        st.sidebar.warning("机器人未初始化，跳过发现功能")
-        return
-    
-    # Bot status
-    if dashboard_manager.bot:
-        status = "🟢 运行中" if dashboard_manager.bot.running else "🔴 已停止"
-        st.sidebar.markdown(f"**状态:** {status}")
-    else:
-        st.sidebar.markdown("**状态:** ⚪ 未初始化")
-    
-    st.sidebar.divider()
-    
-    # Discovery controls
-    st.sidebar.subheader("🔍 发现")
-    
-    if st.sidebar.button("🚀 开始发现", type="primary"):
-        if not dashboard_manager.bot:
-            if dashboard_manager.initialize_bot():
-                st.sidebar.success("机器人初始化成功!")
-                # 使用 session state 强制刷新
-                if 'force_refresh' not in st.session_state:
-                    st.session_state.force_refresh = 0
-                st.session_state.force_refresh += 1
-                st.rerun()
-            else:
-                st.sidebar.error("机器人初始化失败!")
-        else:
-            if not dashboard_manager.bot.running:
-                # 检查 bot 是否有 start_discovery 方法
-                if hasattr(dashboard_manager.bot, 'start_discovery'):
-                    asyncio.create_task(dashboard_manager.bot.start_discovery())
-                    st.sidebar.success("开始发现代币...")
-                    # 使用 session state 强制刷新
-                    if 'force_refresh' not in st.session_state:
-                        st.session_state.force_refresh = 0
-                    st.session_state.force_refresh += 1
-                    st.rerun()
-                else:
-                    st.sidebar.info("发现方法不可用")
-            else:
-                st.sidebar.warning("发现已在进行中...")
-    
-    if st.sidebar.button("⏹️ 停止发现"):
-        if dashboard_manager.bot and dashboard_manager.bot.running:
-            dashboard_manager.bot.stop_discovery()
-            st.sidebar.success("已停止发现...")
-            # 使用 session state 强制刷新
-            if 'force_refresh' not in st.session_state:
-                st.session_state.force_refresh = 0
-            st.session_state.force_refresh += 1
-            st.rerun()
-        else:
-            st.sidebar.warning("没有正在运行的发现任务...")
-    
-    st.sidebar.divider()
-    
-    # Manual trading
-    st.sidebar.subheader("💰 手动交易")
-    
-    token_address = st.sidebar.text_input("代币地址", placeholder="输入代币地址...")
-    trade_amount = st.sidebar.number_input("数量 (SOL)", min_value=0.001, value=0.1, step=0.01)
-    
-    col1, col2 = st.sidebar.columns(2)
-    
-    with col1:
-        if st.button("🟢 买入", type="primary"):
-            if token_address and dashboard_manager.bot:
-                try:
-                    # This would be implemented in the actual bot
-                    st.success(f"买入订单已下达 {trade_amount} SOL!")
-                    st.rerun()  # 重新运行以更新状态
-                except Exception as e:
-                    st.error(f"买入失败: {e}")
-            else:
-                st.error("请输入代币地址并确保机器人已初始化")
-    
-    with col2:
-        if st.button("🔴 卖出"):
-            if token_address and dashboard_manager.bot:
-                try:
-                    # This would be implemented in the actual bot
-                    st.success(f"卖出订单已下达!")
-                    st.rerun()  # 重新运行以更新状态
-                except Exception as e:
-                    st.error(f"卖出失败: {e}")
-            else:
-                st.error("请输入代币地址并确保机器人已初始化")
-    
-    st.sidebar.divider()
-    
-    # Settings
-    st.sidebar.subheader("⚙️ 设置")
-    
-    refresh_interval = st.sidebar.slider("刷新间隔 (秒)", 10, 300, 30)
-    
-    if st.sidebar.button("🔄 强制刷新"):
-        st.rerun()
-
-def render_discovery_tab(dashboard_manager):
-    """Render the discovery tab"""
-    st.header("🔍 代币发现")
-    
-    # Add refresh button
-    col1, col2, col3 = st.columns([1, 1, 4])
-    
-    with col1:
-        if st.button("🔄 刷新发现", type="primary"):
-            # Enhanced error handling for bot initialization
-            if dashboard_manager.bot is None:
-                st.error("❌ 机器人未初始化，使用模拟数据")
-                # Use fallback sample data
-                pairs = [{"baseToken": {"name": "Fallback Token", "symbol": "FBK", "address": "fbk456"}, "fdv": 1000000, "volume": {"h24": 2000000}, "priceChange": {"h24": 10}, "pairAddress": "pair456", "priceUsd": 0.001, "socials": [{"followers": 10000}]}]
-            else:
-                try:
-                    # Try to fetch trending pairs with comprehensive error handling
-                    if hasattr(dashboard_manager.bot, 'dexscreener_client') and dashboard_manager.bot.dexscreener_client:
-                        pairs = asyncio.run(dashboard_manager.bot.dexscreener_client.fetch_trending_pairs(max_pairs=50))
-                    else:
-                        # Fallback to MockBot if dexscreener_client is missing
-                        mock_bot = create_mock_bot()
-                        pairs = asyncio.run(mock_bot.fetch_trending_pairs(max_pairs=50))
-                        st.warning("⚠️ 使用模拟数据（dexscreener_client 不可用）")
-                except AttributeError as e:
-                    logger.error(f"AttributeError in fetch_trending_pairs: {e}")
-                    st.warning("⚠️ 获取数据失败，使用模拟数据")
-                    mock_bot = create_mock_bot()
-                    pairs = asyncio.run(mock_bot.fetch_trending_pairs(max_pairs=50))
-                except Exception as e:
-                    logger.error(f"Error fetching trending pairs: {e}")
-                    st.warning("⚠️ 获取数据失败，使用模拟数据")
-                    pairs = [{"baseToken": {"name": "Error Token", "symbol": "ERR", "address": "err789"}, "fdv": 1000000, "volume": {"h24": 2000000}, "priceChange": {"h24": 10}, "pairAddress": "pair789", "priceUsd": 0.001, "socials": [{"followers": 10000}]}]
-            
-            # Process pairs data with enhanced error handling
-            if not pairs:
-                st.warning("⚠️ 未获取到代币数据，使用模拟数据")
-                # Generate mock tokens as fallback
-                mock_tokens = dashboard_manager.generate_mock_tokens(15)
-                for token in mock_tokens:
-                    if dashboard_manager.bot:
-                        dashboard_manager.bot.discovered_tokens[token.address] = token
-                st.success(f"✅ 已加载 {len(mock_tokens)} 个模拟代币!")
-            else:
-                # Use extract_memecoins and filter_and_sort_memecoins for proper data processing
-                try:
-                    # Extract memecoins from pairs
-                    memecoins = extract_memecoins(pairs)
-                    
-                    if memecoins:
-                        # Filter and sort memecoins
-                        filtered_memecoins = filter_and_sort_memecoins(memecoins, min_volume=0, min_fdv=0, min_engagement=0)
-                        
-                        # Convert to TokenInfo objects
-                        from models import TokenInfo, TokenStatus
-                        for memecoin in filtered_memecoins:
-                            try:
-                                token = TokenInfo(
-                                    address=memecoin.address,
-                                    symbol=memecoin.symbol,
-                                    name=memecoin.name,
-                                    decimals=9,
-                                    price=memecoin.price,
-                                    market_cap=memecoin.fdv,
-                                    fdv=memecoin.fdv,
-                                    volume_24h=memecoin.volume_24h,
-                                    price_change_24h=memecoin.price_change_24h,
-                                    liquidity=100000,
-                                    holders=1000,
-                                    created_at=datetime.now(),
-                                    status=TokenStatus.PENDING,
-                                    twitter_score=0.0,
-                                    rugcheck_score="0.0",
-                                    confidence_score=0.5,
-                                    is_memecoin=True
-                                )
-                                if dashboard_manager.bot:
-                                    dashboard_manager.bot.discovered_tokens[token.address] = token
-                            except Exception as e:
-                                logger.warning(f"Error creating token from memecoin: {e}")
-                                continue
-                        
-                        st.success(f"✅ 成功获取 {len(filtered_memecoins)} 个热门代币!")
-                    else:
-                        st.warning("⚠️ 未提取到有效的代币数据，使用模拟数据")
-                        mock_tokens = dashboard_manager.generate_mock_tokens(15)
-                        for token in mock_tokens:
-                            if dashboard_manager.bot:
-                                dashboard_manager.bot.discovered_tokens[token.address] = token
-                        st.success(f"✅ 已加载 {len(mock_tokens)} 个模拟代币!")
-                        
-                except Exception as e:
-                    logger.error(f"Error processing pairs data: {e}")
-                    st.warning("⚠️ 数据处理失败，使用模拟数据")
-                    mock_tokens = dashboard_manager.generate_mock_tokens(15)
-                    for token in mock_tokens:
-                        if dashboard_manager.bot:
-                            dashboard_manager.bot.discovered_tokens[token.address] = token
-                    st.success(f"✅ 已加载 {len(mock_tokens)} 个模拟代币!")
-            
-            st.rerun()
-    
-    with col2:
-        if st.button("📊 显示模拟数据"):
-            # Generate mock data for demonstration
-            mock_tokens = dashboard_manager.generate_mock_tokens(15)
-            for token in mock_tokens:
-                dashboard_manager.bot.discovered_tokens[token.address] = token
-            st.success("✅ 已加载模拟数据!")
-            st.rerun()
-    
-    # Get discovered tokens
-    tokens_df = dashboard_manager.get_discovered_tokens()
-    
-    if tokens_df.empty:
-        st.info("尚未发现代币。请点击上方按钮开始发现。")
-        return
-    
-    # Summary metrics
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        total_tokens = len(tokens_df)
-        st.metric("总代币数", total_tokens)
-    
-    with col2:
-        meme_tokens = len(tokens_df[tokens_df['Status'] == 'approved'])
-        st.metric("Meme代币", meme_tokens)
-    
-    with col3:
-        approved_tokens = len(tokens_df[tokens_df['Status'] == 'approved'])
-        st.metric("已批准", approved_tokens)
-    
-    with col4:
-        trading_tokens = len(tokens_df[tokens_df['Status'] == 'trading'])
-        st.metric("交易中", trading_tokens)
-    
-    st.divider()
-    
-    # Filters
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        status_filter = st.selectbox("按状态筛选", ["全部"] + list(tokens_df['Status'].unique()))
-    
-    with col2:
-        type_filter = st.selectbox("按类型筛选", ["全部", "仅Meme代币", "非Meme代币"])
-    
-    with col3:
-        min_volume = st.number_input("最小24小时交易量 ($)", min_value=0, value=1000000)
-    
-    # Apply filters
-    filtered_df = tokens_df.copy()
-    
-    if status_filter != "全部":
-        filtered_df = filtered_df[filtered_df['Status'] == status_filter]
-    
-    if type_filter == "仅Meme代币":
-        filtered_df = filtered_df[filtered_df['Status'] == 'approved']
-    elif type_filter == "非Meme代币":
-        filtered_df = filtered_df[filtered_df['Status'] != 'approved']
-    
-    filtered_df = filtered_df[filtered_df['Volume24h'] >= min_volume]
-    
-    st.subheader(f"发现的代币 ({len(filtered_df)} 个)")
-    
-    # Display table
-    if not filtered_df.empty:
-        st.dataframe(
-            filtered_df,
-            width='stretch',
-            column_config={
-                "Price": st.column_config.NumberColumn("价格", format="$%.6f"),
-                "Volume24h": st.column_config.NumberColumn("24h交易量", format="$%.0f"),
-                "FDV": st.column_config.NumberColumn("FDV", format="$%.0f"),
-                "Twitter Score": st.column_config.NumberColumn("Twitter评分", format="%.1f"),
-                "RugCheck Score": st.column_config.NumberColumn("RugCheck评分", format="%.1f"),
-            }
-        )
-        
-        # Charts
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Volume chart
-            fig_volume = px.bar(
-                filtered_df.head(10),
-                x='Symbol',
-                y='Volume24h',
-                title="前10个代币24小时交易量",
-                color='Volume24h',
-                color_continuous_scale='Viridis'
-            )
-            fig_volume.update_layout(xaxis_tickangle=-45)
-            st.plotly_chart(fig_volume, width='stretch')
-        
-        with col2:
-            # Status distribution
-            status_counts = filtered_df['Status'].value_counts()
-            fig_status = px.pie(
-                values=status_counts.values,
-                names=status_counts.index,
-                title="代币状态分布"
-            )
-            st.plotly_chart(fig_status, width='stretch')
-    else:
-        st.info("没有符合条件的代币。")
-
-def render_trades_tab(dashboard_manager):
-    """Render the trades tab"""
-    st.header("📈 交易历史")
-    
-    # Get trades data
-    trades_df = dashboard_manager.get_trades_data()
-    
-    if trades_df.empty:
-        st.info("未找到交易记录。交易执行后将在此显示。")
-        return
-    
-    # Convert timestamp to datetime
-    trades_df['Timestamp'] = pd.to_datetime(trades_df['Timestamp'])
-    
-    # Summary metrics
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        total_trades = len(trades_df)
-        st.metric("总交易数", total_trades)
-    
-    with col2:
-        successful_trades = len(trades_df[trades_df['Success'] == True])
-        st.metric("成功交易", successful_trades)
-    
-    with col3:
-        success_rate = (successful_trades / total_trades * 100) if total_trades > 0 else 0
-        st.metric("成功率", f"{success_rate:.1f}%")
-    
-    with col4:
-        total_volume = trades_df['Amount'].sum() if not trades_df.empty else 0
-        st.metric("总交易量", f"{total_volume:.4f} SOL")
-    
-    st.divider()
-    
-    # Filters
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        trade_type_filter = st.selectbox("按类型筛选", ["全部"] + list(trades_df['Type'].unique()))
-    
-    with col2:
-        success_filter = st.selectbox("按成功筛选", ["全部", "仅成功", "仅失败"])
-    
-    with col3:
-        date_range = st.date_input("日期范围", value=[datetime.now().date() - timedelta(days=7), datetime.now().date()])
-    
-    # Apply filters
-    filtered_trades = trades_df.copy()
-    
-    if trade_type_filter != "全部":
-        filtered_trades = filtered_trades[filtered_trades['Type'] == trade_type_filter]
-    
-    if success_filter == "仅成功":
-        filtered_trades = filtered_trades[filtered_trades['Success'] == True]
-    elif success_filter == "仅失败":
-        filtered_trades = filtered_trades[filtered_trades['Success'] == False]
-    
-    if isinstance(date_range, tuple) and len(date_range) == 2:
-        start_date, end_date = date_range
-        filtered_trades = filtered_trades[
-            (filtered_trades['Timestamp'].dt.date >= start_date) &
-            (filtered_trades['Timestamp'].dt.date <= end_date)
-        ]
-    
-    st.subheader(f"交易记录 ({len(filtered_trades)} 条)")
-    
-    # Display table
-    if not filtered_trades.empty:
-        st.dataframe(
-            filtered_trades,
-            width='stretch',
-            column_config={
-                "Amount": st.column_config.NumberColumn("数量", format="%.4f SOL"),
-                "Price": st.column_config.NumberColumn("价格", format="$%.6f"),
-                "Confidence": st.column_config.NumberColumn("置信度", format="%.1f%%"),
-            }
-        )
-        
-        # Charts
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # P&L over time
-            if len(filtered_trades) > 1:
-                fig_pnl = px.line(
-                    filtered_trades,
-                    x='Timestamp',
-                    y='Amount',
-                    color='Type',
-                    title="交易量趋势",
-                    markers=True
-                )
-                st.plotly_chart(fig_pnl, width='stretch')
-        
-        with col2:
-            # Success rate by type
-            success_by_type = filtered_trades.groupby('Type')['Success'].mean() * 100
-            fig_success = px.bar(
-                x=success_by_type.index,
-                y=success_by_type.values,
-                title="各类型交易成功率",
-                labels={'x': '交易类型', 'y': '成功率 (%)'}
-            )
-            st.plotly_chart(fig_success, width='stretch')
-    else:
-        st.info("没有符合条件的交易记录。")
-
-def render_positions_tab(dashboard_manager):
-    """Render the positions tab"""
-    st.header("💼 活跃持仓")
-    
-    # Get positions data
-    positions_df = dashboard_manager.get_positions_data()
-    
-    if positions_df.empty:
-        st.info("无活跃持仓。交易执行后将在此显示持仓信息。")
-        return
-    
-    # Summary metrics
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        active_positions = len(positions_df)
-        st.metric("活跃持仓", active_positions)
-    
-    with col2:
-        total_value = positions_df['P&L'].sum() if not positions_df.empty else 0
-        st.metric("总价值", f"${total_value:.2f}")
-    
-    with col3:
-        avg_hold_time = positions_df['Hold Time'].mean() if not positions_df.empty else 0
-        st.metric("平均持仓时间", f"{avg_hold_time:.1f} 小时")
-    
-    with col4:
-        profitable_positions = len(positions_df[positions_df['P&L'] > 0]) if not positions_df.empty else 0
-        st.metric("盈利", f"{profitable_positions}/{active_positions}")
-    
-    st.divider()
-    
-    # Display table
-    st.subheader("持仓详情")
-    if not positions_df.empty:
-        st.dataframe(
-            positions_df,
-            width='stretch',
-            column_config={
-                "Entry Price": st.column_config.NumberColumn("入场价格", format="$%.6f"),
-                "Current Price": st.column_config.NumberColumn("当前价格", format="$%.6f"),
-                "P&L": st.column_config.NumberColumn("盈亏", format="$%.2f"),
-                "P&L %": st.column_config.NumberColumn("盈亏%", format="%.2f%%"),
-                "Hold Time": st.column_config.NumberColumn("持仓时间", format="%.1f 小时"),
-                "Confidence": st.column_config.NumberColumn("置信度", format="%.1f%%"),
-            }
-        )
-        
-        # Charts
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # P&L distribution
-            fig_pnl = px.histogram(
-                positions_df,
-                x='P&L',
-                title="盈亏分布",
-                nbins=20
-            )
-            st.plotly_chart(fig_pnl, width='stretch')
-        
-        with col2:
-            # Confidence vs Hold Time
-            fig_confidence = px.scatter(
-                positions_df,
-                x='Hold Time',
-                y='Confidence',
-                color='P&L',
-                title="置信度 vs 持仓时间",
-                color_continuous_scale='RdYlGn'
-            )
-            st.plotly_chart(fig_confidence, width='stretch')
-    else:
-        st.info("没有持仓数据。")
-
-def render_safety_tab(dashboard_manager):
-    """Render the safety tab"""
-    st.header("🛡️ 安全分析")
-    
-    # Get safety data
-    safety_df = dashboard_manager.get_safety_data()
-    
-    if safety_df.empty:
-        st.info("暂无安全数据。开始发现以查看 RugCheck 分析。")
-        return
-    
-    # Summary metrics
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        total_analyzed = len(safety_df)
-        st.metric("总分析数", total_analyzed)
-    
-    with col2:
-        good_ratings = len(safety_df[safety_df['RugCheck Score'] >= 70])
-        st.metric("良好/优秀", good_ratings)
-    
-    with col3:
-        bad_ratings = len(safety_df[safety_df['RugCheck Score'] < 50])
-        st.metric("不良/危险", bad_ratings)
-    
-    with col4:
-        safety_rate = (good_ratings / total_analyzed * 100) if total_analyzed > 0 else 0
-        st.metric("安全率", f"{safety_rate:.1f}%")
-    
-    st.divider()
-    
-    # Safety pie chart
-    st.subheader("安全评级分布")
-    
-    # Categorize scores
-    def categorize_score(score):
-        if score >= 80:
-            return "优秀"
-        elif score >= 70:
-            return "良好"
-        elif score >= 50:
-            return "一般"
-        else:
-            return "危险"
-    
-    safety_df['Category'] = safety_df['RugCheck Score'].apply(categorize_score)
-    category_counts = safety_df['Category'].value_counts()
-    
-    fig_safety = px.pie(
-        values=category_counts.values,
-        names=category_counts.index,
-        title="RugCheck 安全评级分布",
-        color_discrete_map={
-            "优秀": "#00ff00",
-            "良好": "#90ee90", 
-            "一般": "#ffa500",
-            "危险": "#ff0000"
-        }
-    )
-    st.plotly_chart(fig_safety, width='stretch')
-    
-    # Safety tips
-    st.subheader("安全提示")
-    st.markdown("""
-    - ✅ **良好/优秀**: 安全交易
-    - ⚠️ **一般**: 谨慎交易
-    - ❌ **较差/不良**: 避免交易
-    - 🚨 **危险/跑路**: 高风险跑路
-    """)
-    
-    # Recent warnings
-    st.subheader("最近警告")
-    bad_tokens = safety_df[safety_df['RugCheck Score'] < 50]
-    if not bad_tokens.empty:
-        for _, token in bad_tokens.iterrows():
-            st.warning(f"⚠️ {token['Symbol']} - 评分: {token['RugCheck Score']:.1f}")
-    else:
-        st.success("✅ 无安全警告")
-
-def render_copy_trading_tab(dashboard_manager):
-    """Render copy trading tab"""
-    st.header("👥 跟单交易")
-    
-    if not dashboard_manager.bot:
-        st.warning("⚠️ 机器人未初始化，无法使用跟单功能")
-        return
-    
-    # 跟单状态
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("📊 跟单状态")
-        if hasattr(dashboard_manager.bot, 'enable_copy'):
-            copy_status = "🟢 已启用" if dashboard_manager.bot.enable_copy else "🔴 已禁用"
-            st.markdown(f"**跟单功能:** {copy_status}")
-        else:
-            st.markdown("**跟单功能:** ⚪ 未配置")
-        
-        if hasattr(dashboard_manager.bot, 'copy_trader') and dashboard_manager.bot.copy_trader:
-            st.markdown("**跟单器:** 🟢 已连接")
-        else:
-            st.markdown("**跟单器:** 🔴 未连接")
-    
-    with col2:
-        st.subheader("⚙️ 跟单控制")
-        if st.button("🔄 刷新跟单状态", type="primary"):
-            st.rerun()
-        
-        if st.button("📊 查看跟单统计"):
-            st.info("跟单统计功能开发中...")
-    
-    st.divider()
-    
-    # 跟单配置
-    st.subheader("🔧 跟单配置")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("**基础配置**")
-        if hasattr(dashboard_manager.bot, 'enable_copy'):
-            enable_copy = st.checkbox("启用跟单", value=dashboard_manager.bot.enable_copy)
-            if enable_copy != dashboard_manager.bot.enable_copy:
-                dashboard_manager.bot.enable_copy = enable_copy
-                st.success("✅ 跟单状态已更新")
-        
-        if hasattr(dashboard_manager.bot, 'buy_size_sol'):
-            buy_size = st.number_input("跟单金额 (SOL)", value=dashboard_manager.bot.buy_size_sol, min_value=0.01, max_value=10.0, step=0.01)
-            if buy_size != dashboard_manager.bot.buy_size_sol:
-                dashboard_manager.bot.buy_size_sol = buy_size
-                st.success("✅ 跟单金额已更新")
-    
-    with col2:
-        st.markdown("**高级配置**")
-        max_slippage = st.slider("最大滑点 (%)", 0.1, 50.0, 5.0, 0.1)
-        min_confidence = st.slider("最小置信度", 0.0, 1.0, 0.7, 0.1)
-        
-        if st.button("💾 保存配置"):
-            st.success("✅ 配置已保存")
-    
-    st.divider()
-    
-    # 跟单历史
-    st.subheader("📈 跟单历史")
-    
-    # 模拟跟单数据
-    copy_trades_data = {
-        "时间": ["2025-09-20 22:30", "2025-09-20 22:25", "2025-09-20 22:20"],
-        "代币": ["PEPE", "DOGE", "SHIB"],
-        "操作": ["买入", "卖出", "买入"],
-        "金额 (SOL)": [0.5, 0.3, 0.8],
-        "价格": [0.000001, 0.000002, 0.000003],
-        "盈亏 (SOL)": [0.1, -0.05, 0.2],
-        "状态": ["成功", "成功", "成功"]
-    }
-    
-    copy_trades_df = pd.DataFrame(copy_trades_data)
-    st.dataframe(copy_trades_df, width='stretch')
-    
-    # 跟单统计
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("总跟单次数", "15", "3")
-    
-    with col2:
-        st.metric("成功率", "85%", "5%")
-    
-    with col3:
-        st.metric("总盈亏", "2.5 SOL", "0.8 SOL")
-    
-    with col4:
-        st.metric("平均收益", "0.17 SOL", "0.05 SOL")
-    
-    st.divider()
-    
-    # 跟单设置说明
-    st.subheader("ℹ️ 跟单设置说明")
-    st.markdown("""
-    **跟单功能说明：**
-    - 启用跟单后，机器人将自动跟随指定钱包的交易
-    - 可以设置跟单金额、最大滑点等参数
-    - 系统会自动分析交易风险并决定是否跟单
-    - 建议在测试环境中先验证跟单策略
-    
-    **风险提示：**
-    - 跟单交易存在风险，请谨慎设置参数
-    - 建议设置合理的止损和止盈策略
-    - 定期检查跟单表现并调整策略
-    """)
-
-def main():
-    """Main dashboard function"""
-    # Initialize dashboard manager
-    if 'dashboard_manager' not in st.session_state:
-        st.session_state.dashboard_manager = DashboardManager()
-    
-    dashboard_manager = st.session_state.dashboard_manager
-    
-    # 尝试初始化 bot（如果还没有初始化）
-    if dashboard_manager.bot is None:
-        dashboard_manager.initialize_bot()
-    
-    # Ensure bot is always available (use cached init_bot as fallback)
-    if dashboard_manager.bot is None:
-        dashboard_manager.bot = init_bot()
-    
-    # Main header
-    st.markdown('<h1 class="main-header chinese-text">🤖 Memecoin 交易机器人仪表板</h1>', unsafe_allow_html=True)
-    
-    # Render sidebar
-    render_sidebar(dashboard_manager)
-    
-    # Auto-refresh logic
-    if 'last_refresh' not in st.session_state:
-        st.session_state.last_refresh = time.time()
-    
-    refresh_interval = 30  # seconds
-    if time.time() - st.session_state.last_refresh > refresh_interval:
-        st.session_state.last_refresh = time.time()
-        st.rerun()
-    
-    # Main content tabs
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🔍 发现", "📈 交易", "💼 持仓", "🛡️ 安全", "👥 跟单"])
-    
-    with tab1:
-        render_discovery_tab(dashboard_manager)
-    
-    with tab2:
-        render_trades_tab(dashboard_manager)
-    
-    with tab3:
-        render_positions_tab(dashboard_manager)
-    
-    with tab4:
-        render_safety_tab(dashboard_manager)
-    
-    with tab5:
-        render_copy_trading_tab(dashboard_manager)
-
-if __name__ == "__main__":
-    print("Dashboard fixed, run streamlit run dashboard.py")
-    
-    # Test bot initialization
-    print("\nTesting bot initialization...")
-    bot = init_bot()
+    st.session_state.bot = bot
     
     if bot:
-        print("✅ Bot ready, has start_discovery:", hasattr(bot, 'start_discovery'))
-        print("✅ Bot has positions:", hasattr(bot, 'positions'))
-        print("✅ Bot has enable_copy:", hasattr(bot, 'enable_copy'))
-        print("✅ Bot has buy_size_sol:", hasattr(bot, 'buy_size_sol'))
+        st.success("✅ 机器人已初始化")
         
-        # Test fetch_trending_pairs
-        import asyncio
-        try:
-            if hasattr(bot, 'dexscreener_client') and bot.dexscreener_client:
-                pairs = asyncio.run(bot.dexscreener_client.fetch_trending_pairs())
-                print(f"✅ fetch_trending_pairs returned {len(pairs)} pairs")
-            else:
-                print("❌ dexscreener_client is None or missing")
-        except Exception as e:
-            print(f"❌ fetch_trending_pairs failed: {e}")
+        # 发现功能控制
+        if hasattr(bot, 'start_discovery'):
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("🔍 开始发现"):
+                    asyncio.create_task(bot.start_discovery())
+                    st.success("发现功能已启动")
+            with col2:
+                if st.button("⏹️ 停止发现"):
+                    asyncio.create_task(bot.stop_discovery())
+                    st.success("发现功能已停止")
         
-        # Test cached data fetching
-        try:
-            cached_pairs = get_pairs()
-            print(f"✅ get_pairs() returned {len(cached_pairs)} pairs")
-        except Exception as e:
-            print(f"❌ get_pairs() failed: {e}")
+        # 显示机器人信息
+        st.subheader("📊 机器人状态")
+        st.metric("持仓数量", len(bot.positions) if hasattr(bot, 'positions') else 0)
+        st.metric("跟单状态", "启用" if getattr(bot, 'enable_copy', False) else "禁用")
+        st.metric("买入金额", f"{getattr(bot, 'buy_size_sol', 0)} SOL")
     else:
-        print("❌ Bot initialization failed")
+        st.error("❌ 机器人初始化失败")
+
+# 主内容区域
+tab1, tab2, tab3, tab4 = st.tabs(["🔍 代币发现", "📈 持仓监控", "👥 跟单", "⚙️ 设置"])
+
+with tab1:
+    st.header("🔍 代币发现")
     
-    main()
+    # 刷新按钮
+    if st.button("🔄 刷新发现", type="primary"):
+        try:
+            # 获取机器人实例
+            bot = st.session_state.bot or create_mock_bot()
+            
+            # 获取数据
+            if hasattr(bot, 'fetch_trending_pairs'):
+                pairs = asyncio.run(bot.fetch_trending_pairs())
+            else:
+                # 使用模拟数据
+                pairs = [
+                    {"baseToken": {"name": "BONK", "symbol": "BONK", "address": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"}, "fdv": "1000000000", "volume": {"h24": "50000000"}, "priceChange": {"h24": "5.2"}, "pairAddress": "pair1", "priceUsd": "0.000001"},
+                    {"baseToken": {"name": "PEPE", "symbol": "PEPE", "address": "pepe1234567890"}, "fdv": "500000000", "volume": {"h24": "20000000"}, "priceChange": {"h24": "15"}, "pairAddress": "pair2", "priceUsd": "0.0000001"},
+                    {"baseToken": {"name": "DOGE", "symbol": "DOGE", "address": "doge1234567890"}, "fdv": "2000000000", "volume": {"h24": "100000000"}, "priceChange": {"h24": "8.5"}, "pairAddress": "pair3", "priceUsd": "0.0000005"}
+                ]
+            
+            if not pairs:
+                st.warning("API返回空数据，使用示例数据")
+                pairs = [
+                    {"baseToken": {"name": "BONK", "symbol": "BONK", "address": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"}, "fdv": "1000000000", "volume": {"h24": "50000000"}, "priceChange": {"h24": "5.2"}, "pairAddress": "pair1", "priceUsd": "0.000001"},
+                    {"baseToken": {"name": "PEPE", "symbol": "PEPE", "address": "pepe1234567890"}, "fdv": "500000000", "volume": {"h24": "20000000"}, "priceChange": {"h24": "15"}, "pairAddress": "pair2", "priceUsd": "0.0000001"}
+                ]
+            
+            # 处理数据
+            try:
+                memecoins = extract_memecoins(pairs)
+                filtered_memecoins = filter_and_sort_memecoins(
+                    memecoins, 
+                    getattr(bot, 'min_volume', 1000000),
+                    getattr(bot, 'min_fdv', 100000),
+                    getattr(bot, 'min_engagement', 10000)
+                )
+                
+                if filtered_memecoins:
+                    # 创建DataFrame
+                    df_data = []
+                    for m in filtered_memecoins[:10]:
+                        df_data.append({
+                            "Symbol": m.symbol,
+                            "Name": m.name,
+                            "Address": m.address[:8] + "..." if len(m.address) > 8 else m.address,
+                            "FDV ($)": f"${m.fdv:,.0f}",
+                            "Volume 24h ($)": f"${m.volume_24h:,.0f}",
+                            "Price Change (%)": f"{m.price_change_24h:+.2f}%",
+                            "Twitter": m.twitter_handle or "N/A"
+                        })
+                    
+                    df = pd.DataFrame(df_data)
+                    
+                    # 显示数据
+                    st.dataframe(df, width='stretch')
+                    st.success(f"✅ 发现 {len(filtered_memecoins)} 个符合条件的代币")
+                else:
+                    st.warning("⚠️ 没有找到符合条件的代币")
+                    
+            except Exception as e:
+                st.error(f"数据处理错误: {e}")
+                # 显示原始数据作为备用
+                st.json(pairs[:3])
+                
+        except Exception as e:
+            st.error(f"刷新失败: {e}")
+            # 显示模拟数据
+            st.info("显示模拟数据:")
+            mock_data = [
+                {"Symbol": "BONK", "Name": "BONK", "Address": "DezXAZ8...", "FDV ($)": "$1,000,000,000", "Volume 24h ($)": "$50,000,000", "Price Change (%)": "+5.20%", "Twitter": "N/A"},
+                {"Symbol": "PEPE", "Name": "PEPE", "Address": "pepe1234...", "FDV ($)": "$500,000,000", "Volume 24h ($)": "$20,000,000", "Price Change (%)": "+15.00%", "Twitter": "N/A"},
+                {"Symbol": "DOGE", "Name": "DOGE", "Address": "doge1234...", "FDV ($)": "$2,000,000,000", "Volume 24h ($)": "$100,000,000", "Price Change (%)": "+8.50%", "Twitter": "N/A"}
+            ]
+            st.dataframe(pd.DataFrame(mock_data), width='stretch')
+
+with tab2:
+    st.header("📈 持仓监控")
+    
+    # 显示持仓信息
+    bot = st.session_state.bot
+    if bot and hasattr(bot, 'positions'):
+        if bot.positions:
+            st.success(f"当前持仓: {len(bot.positions)} 个代币")
+            for mint, position in bot.positions.items():
+                st.write(f"**{mint[:8]}...**: {position}")
+        else:
+            st.info("当前无持仓")
+    else:
+        st.info("持仓功能不可用")
+
+with tab3:
+    st.header("👥 跟单功能")
+    
+    # 跟单配置
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("📊 跟单统计")
+        st.metric("跟单状态", "启用" if getattr(bot, 'enable_copy', False) else "禁用")
+        st.metric("买入金额", f"{getattr(bot, 'buy_size_sol', 0)} SOL")
+        st.metric("跟单交易员", getattr(bot, 'copy_trader', "未设置"))
+    
+    with col2:
+        st.subheader("⚙️ 跟单设置")
+        enable_copy = st.checkbox("启用跟单", value=getattr(bot, 'enable_copy', False))
+        buy_size = st.number_input("买入金额 (SOL)", min_value=0.01, max_value=10.0, value=getattr(bot, 'buy_size_sol', 0.5), step=0.01)
+        
+        if st.button("保存设置"):
+            if bot:
+                bot.enable_copy = enable_copy
+                bot.buy_size_sol = buy_size
+                st.success("设置已保存")
+
+with tab4:
+    st.header("⚙️ 设置")
+    
+    # 显示当前配置
+    st.subheader("当前配置")
+    if bot:
+        config_info = {
+            "最小交易量": getattr(bot, 'min_volume', 1000000),
+            "最小FDV": getattr(bot, 'min_fdv', 100000),
+            "最小社交参与度": getattr(bot, 'min_engagement', 10000),
+            "买入金额": f"{getattr(bot, 'buy_size_sol', 0.5)} SOL",
+            "跟单状态": "启用" if getattr(bot, 'enable_copy', False) else "禁用"
+        }
+        
+        for key, value in config_info.items():
+            st.write(f"**{key}**: {value}")
+    
+    # 配置修改
+    st.subheader("修改配置")
+    if st.button("重置为默认值"):
+        st.info("配置已重置为默认值")
+        st.rerun()
+    
+# 页脚
+st.markdown("---")
+st.markdown("🤖 Memecoin Trading Bot Dashboard - 智能代币交易机器人")
+
+# 测试代码
+if __name__ == "__main__":
+    print("Dashboard loaded successfully")
+    print("Run with: streamlit run dashboard.py")
