@@ -51,6 +51,11 @@ class MemecoinBot:
         self.active_positions: Dict[str, TokenInfo] = {}
         self.positions = {}  # 添加 positions 属性
         
+        # Copy trading attributes
+        self.enable_copy = True
+        self.buy_size_sol = 0.5
+        self.copy_trader = None
+        
         # Load existing stats
         self.trading_stats = self.logger.load_trading_stats()
         

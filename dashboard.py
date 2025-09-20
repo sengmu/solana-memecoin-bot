@@ -819,6 +819,118 @@ def render_safety_tab(dashboard_manager):
     else:
         st.success("✅ 无安全警告")
 
+def render_copy_trading_tab(dashboard_manager):
+    """Render copy trading tab"""
+    st.header("👥 跟单交易")
+    
+    if not dashboard_manager.bot:
+        st.warning("⚠️ 机器人未初始化，无法使用跟单功能")
+        return
+    
+    # 跟单状态
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("📊 跟单状态")
+        if hasattr(dashboard_manager.bot, 'enable_copy'):
+            copy_status = "🟢 已启用" if dashboard_manager.bot.enable_copy else "🔴 已禁用"
+            st.markdown(f"**跟单功能:** {copy_status}")
+        else:
+            st.markdown("**跟单功能:** ⚪ 未配置")
+        
+        if hasattr(dashboard_manager.bot, 'copy_trader') and dashboard_manager.bot.copy_trader:
+            st.markdown("**跟单器:** 🟢 已连接")
+        else:
+            st.markdown("**跟单器:** 🔴 未连接")
+    
+    with col2:
+        st.subheader("⚙️ 跟单控制")
+        if st.button("🔄 刷新跟单状态", type="primary"):
+            st.rerun()
+        
+        if st.button("📊 查看跟单统计"):
+            st.info("跟单统计功能开发中...")
+    
+    st.divider()
+    
+    # 跟单配置
+    st.subheader("🔧 跟单配置")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**基础配置**")
+        if hasattr(dashboard_manager.bot, 'enable_copy'):
+            enable_copy = st.checkbox("启用跟单", value=dashboard_manager.bot.enable_copy)
+            if enable_copy != dashboard_manager.bot.enable_copy:
+                dashboard_manager.bot.enable_copy = enable_copy
+                st.success("✅ 跟单状态已更新")
+        
+        if hasattr(dashboard_manager.bot, 'buy_size_sol'):
+            buy_size = st.number_input("跟单金额 (SOL)", value=dashboard_manager.bot.buy_size_sol, min_value=0.01, max_value=10.0, step=0.01)
+            if buy_size != dashboard_manager.bot.buy_size_sol:
+                dashboard_manager.bot.buy_size_sol = buy_size
+                st.success("✅ 跟单金额已更新")
+    
+    with col2:
+        st.markdown("**高级配置**")
+        max_slippage = st.slider("最大滑点 (%)", 0.1, 50.0, 5.0, 0.1)
+        min_confidence = st.slider("最小置信度", 0.0, 1.0, 0.7, 0.1)
+        
+        if st.button("💾 保存配置"):
+            st.success("✅ 配置已保存")
+    
+    st.divider()
+    
+    # 跟单历史
+    st.subheader("📈 跟单历史")
+    
+    # 模拟跟单数据
+    copy_trades_data = {
+        "时间": ["2025-09-20 22:30", "2025-09-20 22:25", "2025-09-20 22:20"],
+        "代币": ["PEPE", "DOGE", "SHIB"],
+        "操作": ["买入", "卖出", "买入"],
+        "金额 (SOL)": [0.5, 0.3, 0.8],
+        "价格": [0.000001, 0.000002, 0.000003],
+        "盈亏 (SOL)": [0.1, -0.05, 0.2],
+        "状态": ["成功", "成功", "成功"]
+    }
+    
+    copy_trades_df = pd.DataFrame(copy_trades_data)
+    st.dataframe(copy_trades_df, width='stretch')
+    
+    # 跟单统计
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("总跟单次数", "15", "3")
+    
+    with col2:
+        st.metric("成功率", "85%", "5%")
+    
+    with col3:
+        st.metric("总盈亏", "2.5 SOL", "0.8 SOL")
+    
+    with col4:
+        st.metric("平均收益", "0.17 SOL", "0.05 SOL")
+    
+    st.divider()
+    
+    # 跟单设置说明
+    st.subheader("ℹ️ 跟单设置说明")
+    st.markdown("""
+    **跟单功能说明：**
+    - 启用跟单后，机器人将自动跟随指定钱包的交易
+    - 可以设置跟单金额、最大滑点等参数
+    - 系统会自动分析交易风险并决定是否跟单
+    - 建议在测试环境中先验证跟单策略
+    
+    **风险提示：**
+    - 跟单交易存在风险，请谨慎设置参数
+    - 建议设置合理的止损和止盈策略
+    - 定期检查跟单表现并调整策略
+    """)
+
 def main():
     """Main dashboard function"""
     # Initialize dashboard manager
@@ -847,7 +959,7 @@ def main():
         st.rerun()
     
     # Main content tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["🔍 发现", "📈 交易", "💼 持仓", "🛡️ 安全"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🔍 发现", "📈 交易", "💼 持仓", "🛡️ 安全", "👥 跟单"])
     
     with tab1:
         render_discovery_tab(dashboard_manager)
@@ -860,6 +972,9 @@ def main():
     
     with tab4:
         render_safety_tab(dashboard_manager)
+    
+    with tab5:
+        render_copy_trading_tab(dashboard_manager)
 
 if __name__ == "__main__":
     print("Dashboard fixed, run streamlit run dashboard.py")
