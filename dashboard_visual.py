@@ -237,13 +237,27 @@ def render_sidebar(dashboard_manager):
     # 快速配置
     st.sidebar.markdown("## ⚙️ 快速配置")
     
-    if st.sidebar.button("🔧 打开配置界面"):
-        st.sidebar.info("配置界面将在新标签页打开")
-        st.markdown("""
-        <script>
-            window.open('http://localhost:8502', '_blank');
-        </script>
-        """, unsafe_allow_html=True)
+    # 配置界面链接
+    st.sidebar.markdown("### 🔧 配置界面")
+    
+    # 使用 st.link_button 如果可用，否则使用普通链接
+    try:
+        st.sidebar.link_button("🔧 打开配置界面", "http://localhost:8502")
+    except AttributeError:
+        # 如果 st.link_button 不可用，使用普通链接
+        st.sidebar.markdown("[🔧 点击打开配置界面](http://localhost:8502)")
+    
+    # 显示配置界面状态
+    if st.sidebar.button("📊 检查配置界面状态"):
+        try:
+            import requests
+            response = requests.get("http://localhost:8502", timeout=2)
+            if response.status_code == 200:
+                st.sidebar.success("✅ 配置界面运行正常")
+            else:
+                st.sidebar.warning("⚠️ 配置界面可能未启动")
+        except:
+            st.sidebar.error("❌ 配置界面未启动")
     
     # 设置
     st.sidebar.markdown("## ⚙️ 设置")

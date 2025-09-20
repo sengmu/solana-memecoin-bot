@@ -137,7 +137,22 @@ class ConfigManager:
 
 def render_header():
     """渲染页面头部"""
-    st.markdown('<h1 class="main-header">⚙️ 交易配置工具</h1>', unsafe_allow_html=True)
+    # 添加导航链接
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col1:
+        try:
+            st.link_button("📊 返回主仪表板", "http://localhost:8501")
+        except AttributeError:
+            st.markdown("[📊 返回主仪表板](http://localhost:8501)")
+    
+    with col2:
+        st.markdown('<h1 class="main-header">⚙️ 交易配置工具</h1>', unsafe_allow_html=True)
+    
+    with col3:
+        if st.button("🔄 刷新页面"):
+            st.rerun()
+    
     st.markdown("---")
 
 def render_config_status(config_manager):
