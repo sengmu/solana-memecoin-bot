@@ -8,6 +8,7 @@ import logging
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 from pathlib import Path
+from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
@@ -22,6 +23,143 @@ from jupiter_trader import JupiterTrader
 from copy_trader import CopyTrader
 from wallet_monitor import WalletMonitor
 from logger import setup_bot_logging, TradeLogger, ErrorHandler
+
+
+@dataclass
+class MemecoinData:
+    """Data structure for memecoin information."""
+    symbol: str
+    name: str
+    address: str
+    price: float
+    volume_24h: float
+    price_change_24h: float
+    fdv: float
+    social_engagement: int = 0
+
+
+def parse_number(text: str) -> float:
+    """Parse number strings like '1.2M', '$1,000,000', '500K' to float"""
+    if not text or text == '':
+        return 0.0
+    
+    # Convert to string if not already
+    text = str(text)
+    
+    # Remove common prefixes and suffixes
+    text = text.replace('$', '').replace(',', '').upper().strip()
+    
+    if not text or text == '0':
+        return 0.0
+    
+    try:
+        if 'K' in text:
+            return float(text.replace('K', '')) * 1000
+        elif 'M' in text:
+            return float(text.replace('M', '')) * 1000000
+        elif 'B' in text:
+            return float(text.replace('B', '')) * 1000000000
+        else:
+            return float(text)
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def extract_memecoins(pairs: List[Dict[str, Any]]) -> List[MemecoinData]:
+    """Extract memecoin data from DexScreener pairs."""
+    memecoins = []
+    
+    for pair in pairs:
+        if 'baseToken' not in pair:
+            continue
+            
+        try:
+            # Parse string numbers to floats
+            volume_24h = parse_number(pair.get('volume', {}).get('h24', '0'))
+            fdv = parse_number(pair.get('fdv', '0'))
+            price_change_24h = float(pair.get('priceChange', {}).get('h24', 0))
+            price = float(pair.get('priceUsd', 0))
+            
+            # Handle social engagement
+            socials = pair.get('socials', [])
+            social_engagement = 0
+            if socials and len(socials) > 0:
+                social_engagement = int(socials[0].get('followers', 0))
+            
+            memecoin = MemecoinData(
+                symbol=pair['baseToken'].get('symbol', 'UNKNOWN'),
+                name=pair['baseToken'].get('name', 'Unknown Token'),
+                address=pair['baseToken'].get('address', 'unknown'),
+                price=price,
+                volume_24h=volume_24h,
+                price_change_24h=price_change_24h,
+                fdv=fdv,
+                social_engagement=social_engagement
+            )
+            memecoins.append(memecoin)
+            
+        except (ValueError, TypeError, KeyError) as e:
+            logging.warning(f"Error extracting memecoin data from pair: {e}")
+            continue
+    
+    return memecoins
+
+
+def filter_and_sort_memecoins(
+    memecoins: List[MemecoinData], 
+    min_volume: float = 0, 
+    min_fdv: float = 0, 
+    min_engagement: int = 0
+) -> List[MemecoinData]:
+    """Filter and sort memecoins with safe comparisons."""
+    if not memecoins:
+        return []
+    
+    filtered = []
+    for m in memecoins:
+        try:
+            # Safe comparison with type conversion
+            volume_ok = float(m.volume_24h) >= min_volume
+            fdv_ok = float(m.fdv) >= min_fdv
+            engagement_ok = int(m.social_engagement) >= min_engagement
+            
+            if volume_ok and fdv_ok and engagement_ok:
+                filtered.append(m)
+        except (ValueError, TypeError) as e:
+            logging.warning(f"Error filtering memecoin {m.symbol}: {e}")
+            continue  # Skip bad data
+    
+    # Sort by volume (descending)
+    return sorted(filtered, key=lambda x: float(x.volume_24h), reverse=True)
+
+
+# Test function
+def test_extract_memecoins():
+    """Test extract_memecoins with sample data"""
+    test_pairs = [
+        {
+            "baseToken": {"name": "Test Token", "symbol": "TEST", "address": "test123"},
+            "volume": {"h24": "1.2M"},
+            "fdv": "$1,000,000",
+            "priceChange": {"h24": 10},
+            "priceUsd": 0.001,
+            "socials": [{"followers": 5000}]
+        },
+        {
+            "baseToken": {"name": "Another Token", "symbol": "ANOTHER", "address": "test456"},
+            "volume": {"h24": "500K"},
+            "fdv": "$2,500,000",
+            "priceChange": {"h24": -5},
+            "priceUsd": 0.002,
+            "socials": [{"followers": 2000}]
+        }
+    ]
+    
+    result = extract_memecoins(test_pairs)
+    print(f"✅ extract_memecoins returned {len(result)} memecoins")
+    for memecoin in result:
+        print(f"  - {memecoin.symbol}: volume={memecoin.volume_24h}, fdv={memecoin.fdv}, social={memecoin.social_engagement}")
+    return result
 
 
 class MemecoinBot:

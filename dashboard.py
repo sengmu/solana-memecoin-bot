@@ -23,6 +23,33 @@ except ImportError as e:
     st.error(f"导入错误: {e}")
     st.stop()
 
+# Utility function for parsing number strings
+def parse_number(text: str) -> float:
+    """Parse number strings like '1.2M', '$1,000,000', '500K' to float"""
+    if not text or text == '':
+        return 0.0
+    
+    # Convert to string if not already
+    text = str(text)
+    
+    # Remove common prefixes and suffixes
+    text = text.replace('$', '').replace(',', '').upper().strip()
+    
+    if not text or text == '0':
+        return 0.0
+    
+    try:
+        if 'K' in text:
+            return float(text.replace('K', '')) * 1000
+        elif 'M' in text:
+            return float(text.replace('M', '')) * 1000000
+        elif 'B' in text:
+            return float(text.replace('B', '')) * 1000000000
+        else:
+            return float(text)
+    except (ValueError, TypeError):
+        return 0.0
+
 # Import utility functions with fallbacks
 try:
     from memecoin_bot import extract_memecoins, filter_and_sort_memecoins
@@ -33,23 +60,50 @@ except ImportError:
         memecoins = []
         for pair in pairs[:5]:  # Limit to 5 for safety
             if 'baseToken' in pair:
+                # Parse string numbers to floats
+                volume_24h = parse_number(pair.get('volume', {}).get('h24', '0'))
+                fdv = parse_number(pair.get('fdv', '0'))
+                price_change_24h = float(pair.get('priceChange', {}).get('h24', 0))
+                
+                # Handle social engagement
+                socials = pair.get('socials', [])
+                social_engagement = 0
+                if socials and len(socials) > 0:
+                    social_engagement = int(socials[0].get('followers', 0))
+                
                 memecoins.append({
                     'symbol': pair['baseToken'].get('symbol', 'UNKNOWN'),
                     'name': pair['baseToken'].get('name', 'Unknown Token'),
                     'address': pair['baseToken'].get('address', 'unknown'),
-                    'price': pair.get('priceUsd', 0),
-                    'volume_24h': pair.get('volume', {}).get('h24', 0),
-                    'price_change_24h': pair.get('priceChange', {}).get('h24', 0),
-                    'fdv': pair.get('fdv', 0)
+                    'price': float(pair.get('priceUsd', 0)),
+                    'volume_24h': volume_24h,
+                    'price_change_24h': price_change_24h,
+                    'fdv': fdv,
+                    'social_engagement': social_engagement
                 })
         return memecoins
     
-    def filter_and_sort_memecoins(memecoins):
-        """Filter and sort memecoins"""
+    def filter_and_sort_memecoins(memecoins, min_volume=0, min_fdv=0, min_engagement=0):
+        """Filter and sort memecoins with safe comparisons"""
         if not memecoins:
             return []
-        # Simple sorting by volume
-        return sorted(memecoins, key=lambda x: x.get('volume_24h', 0), reverse=True)
+        
+        filtered = []
+        for m in memecoins:
+            try:
+                # Safe comparison with type conversion
+                volume_ok = float(m.get('volume_24h', 0)) >= min_volume
+                fdv_ok = float(m.get('fdv', 0)) >= min_fdv
+                engagement_ok = int(m.get('social_engagement', 0)) >= min_engagement
+                
+                if volume_ok and fdv_ok and engagement_ok:
+                    filtered.append(m)
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Error filtering memecoin {m.get('symbol', 'UNKNOWN')}: {e}")
+                continue  # Skip bad data
+        
+        # Sort by volume (descending)
+        return sorted(filtered, key=lambda x: float(x.get('volume_24h', 0)), reverse=True)
 
 # Page configuration
 st.set_page_config(
